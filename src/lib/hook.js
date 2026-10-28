@@ -5,6 +5,9 @@
 import { dropGhostTail } from './transcribe.js';
 
 export const SHORT_MAX_MS = 150_000; // up to 2 min 30 = one Reel; longer = several moments
+export const CHATGPT_USAGE_URL = 'https://chatgpt.com/#settings/Usage';
+/** Which AI analyses: the user's choice, else Claude Code when it is already connected on this Mac, else ChatGPT. */
+export const hookEngineOf = (s, claudeConnected) => s?.hookEngine || (claudeConnected ? 'claude' : 'chatgpt');
 
 export const fmtClock = (ms) => {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -50,8 +53,9 @@ const SCHEMA = {
         type: 'object',
         additionalProperties: false,
         // order matters: the AI writes the candidates and their scores before it picks the hook
-        required: ['title', 'candidates', 'hook', 'body', 'headlines', 'caption'],
+        required: ['message', 'title', 'candidates', 'hook', 'body', 'headlines', 'caption'],
         properties: {
+          message: { type: 'string', description: 'L’idée que ce Reel fait passer, en une phrase, différente de celle des autres moments' },
           title: { type: 'string', description: 'Sujet du moment en 3 à 6 mots' },
           candidates: {
             type: 'array',
@@ -96,10 +100,17 @@ export function buildHookRequest(lines, durationMs) {
   const short = durationMs <= SHORT_MAX_MS;
   const max = Math.min(5, Math.max(2, Math.round(durationMs / 180_000))); // ~1 Reel per 3 min of audio
   const count = short ? 'exactement 1 moment : cet audio est déjà un seul Reel, le body garde l’essentiel du clip'
-    : `${max === 2 ? '2' : `entre 2 et ${max}`} moments : cet audio est long, chaque moment devient un Reel séparé de 30 à 90 secondes, sur un seul sujet, sans chevauchement entre moments, classés du hook le plus fort au moins fort`;
+    : `jusqu’à ${max} moments : cet audio est long, chaque moment devient un Reel séparé de 30 à 90 secondes sur un seul sujet, classés du hook le plus fort au moins fort`;
   const system = `Tu es le monteur d’un créateur francophone qui publie des Reels et des TikTok parlés (face caméra, business, entrepreneuriat, e-commerce, mindset). Ton travail : transformer un audio brut en Reel qui retient l’audience. Tu reçois la transcription horodatée en lignes numérotées (L1, L2…). Trouve ${count}.
 
-MÉTHODE, à suivre dans cet ordre pour chaque moment :
+${short ? '' : `DES MOMENTS VRAIMENT DIFFÉRENTS
+- Commence par repérer les sujets distincts de l’audio. Chaque moment porte un message que les autres ne racontent pas : une autre idée, une autre leçon, une autre histoire.
+- Deux Reels qui disent la même chose avec d’autres mots, c’est un seul moment. Si la personne répète une idée à plusieurs endroits, garde la meilleure version dans un seul moment.
+- Les candidates, le hook et le body d’un moment viennent du passage de son sujet. Un moment ne reprend jamais une ligne d’un autre moment.
+- Mieux vaut 2 moments vraiment différents que ${max} qui se ressemblent.
+
+`}MÉTHODE, à suivre dans cet ordre pour chaque moment :
+0. message : l’idée que ce Reel fait passer, en une phrase${short ? '' : ', différente des autres moments'}.
 1. Lis toute la transcription. Repère le résultat, le chiffre ou l’idée la plus forte.
 2. candidates : relève 4 à 6 phrases réellement prononcées qui pourraient ouvrir la vidéo, chacune déjà débarrassée du superflu du début (voir 3), avec en une phrase pourquoi elle arrête le scroll. Note chacune avec ces grilles, sans arrondir à ton goût :
    - stop (arrête le scroll) : 5 = résultat impressionnant chiffré (gros montant, chiffre que peu de gens atteignent, contraste avant/après), ou détail insolite qui fait dire « quoi ? ». 4 = chiffre plus modeste ou technique (pourcentage, visites), affirmation qui contredit une idée reçue, aveu d’une erreur personnelle, avertissement direct (« tu vas te planter »). 3 = conseil clair ou opinion tranchée. 2 = constat général attendu. 1 = intro, transition, politesse.
@@ -170,28 +181,43 @@ const fixRange = (r, n) => {
 };
 
 const countWords = (s) => tokens(s).length;
+const touches = (r, used) => { for (let l = r.from; l <= r.to; l++) if (used.has(l)) return true; return false; };
+/** A line range minus the lines in `used` → the runs that are left. */
+function minus(r, used) {
+  const out = [];
+  for (let l = r.from; l <= r.to; l++) {
+    if (used.has(l)) continue;
+    if (out.length && out.at(-1).to === l - 1) out.at(-1).to = l;
+    else out.push({ from: l, to: l });
+  }
+  return out;
+}
 const shortScore = (n) => (n <= 15 ? 5 : n <= 22 ? 4 : n <= 30 ? 3 : n <= 40 ? 2 : 1);
 const clampScore = (x) => Math.min(5, Math.max(1, Math.round(Number(x) || 1)));
 
 /**
  * The final hook = the best-scored candidate, picked here rather than by the AI so the same scores always give
  * the same hook: total = 2 × stop + clair + court + envie (court from our own word count); ties → better stop,
- * then shorter, then later in the audio. → { ...span, exact, why } or null
+ * then shorter, then later in the audio. → { ...span, exact, why }, 'used' when every candidate belongs to an
+ * earlier moment (a repeat), or null when none is in the transcript.
  */
-function bestCandidate(cands, lines) {
+function bestCandidate(cands, lines, used) {
   const n = lines.length;
   const scored = [];
+  let repeats = 0;
   for (const c of cands || []) {
     const r = fixRange(c, n);
     const at = r && (locate(c.quote || '', lines, r.from - 1, r.to - 1) || locate(c.quote || '', lines, 0, n - 1));
     if (!at) continue;
     const span = spanOf(lines, at.a, at.i, at.b, at.j);
+    if (touches(span, used)) { repeats++; continue; } // already in an earlier moment
     const words = countWords(span.text);
     const stop = clampScore(c.stop);
     scored.push({ span, why: String(c.why || '').trim(), stop, words, total: 2 * stop + clampScore(c.clair) + shortScore(words) + clampScore(c.envie) });
   }
   scored.sort((x, y) => y.total - x.total || y.stop - x.stop || x.words - y.words || y.span.start - x.span.start);
-  return scored.length ? { ...scored[0].span, exact: true, why: scored[0].why } : null;
+  if (!scored.length) return repeats ? 'used' : null;
+  return { ...scored[0].span, exact: true, why: scored[0].why };
 }
 
 /**
@@ -202,8 +228,10 @@ export function parseHookReply(reply, lines, { durationMs = Infinity } = {}) {
   const data = typeof reply === 'string' ? JSON.parse(reply) : reply;
   const n = lines.length;
   const moments = [];
+  const used = new Set(); // lines owned by an earlier, better moment: never in two Reels
   for (const m of data?.moments || []) {
-    let hook = bestCandidate(m.candidates, lines);
+    let hook = bestCandidate(m.candidates, lines, used);
+    if (hook === 'used') continue; // every candidate is already in an earlier moment: the same moment again
     if (!hook) {
       const hr = fixRange(m.hook, n);
       if (!hr) continue;
@@ -214,16 +242,20 @@ export function parseHookReply(reply, lines, { durationMs = Infinity } = {}) {
         : { ...spanOf(lines, hr.from - 1, 0, hr.to - 1, lines[hr.to - 1].words.length - 1), exact: false };
       hook.why = String(m.hook.why || '').trim();
     }
+    if (touches(hook, used)) continue; // the same moment again
     const body = [];
     for (const b of m.body || []) {
       const r = fixRange(b, n);
       if (!r) continue;
-      // never play the hook's lines twice: cut them out of the passage
-      const parts = r.to < hook.from || r.from > hook.to ? [r] : [{ from: r.from, to: hook.from - 1 }, { from: hook.to + 1, to: r.to }];
-      for (const p of parts.filter((x) => x.from <= x.to)) {
+      // never play the hook's lines twice, never take lines from another moment
+      const own = new Set(used);
+      for (let l = hook.from; l <= hook.to; l++) own.add(l);
+      for (const p of minus(r, own)) {
         body.push({ ...spanOf(lines, p.from - 1, 0, p.to - 1, lines[p.to - 1].words.length - 1), label: String(b.summary || '').trim() });
       }
     }
+    if (!body.length && moments.length) continue; // a hook alone is not a Reel
+    for (const x of [hook, ...body]) for (let l = x.from; l <= x.to; l++) used.add(l);
     moments.push({
       title: String(m.title || '').trim(),
       hook,

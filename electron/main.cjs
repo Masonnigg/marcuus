@@ -113,7 +113,7 @@ let claudeProc = null;
 // opts.system replaces Claude Code's own system prompt; opts.schema forces a JSON answer (structured output)
 ipcMain.handle('claude:ask', (_e, prompt, model, opts = {}) => new Promise((resolve) => {
   const bin = findClaude();
-  if (!bin) return resolve({ ok: false, error: 'Claude Code CLI introuvable. Installe-le : curl -fsSL https://claude.ai/install.sh | bash' });
+  if (!bin) return resolve({ ok: false, error: 'Claude Code n’est pas installé sur ce Mac.' });
   const cwd = path.join(dataDir(), 'claude-workdir');
   fs.mkdirSync(cwd, { recursive: true });
   const args = ['-p', '--output-format', 'json', '--tools', '', '--no-session-persistence', '--setting-sources', ''];
@@ -323,6 +323,42 @@ ipcMain.handle('openai:status', async () => {
     return { ok: false, error: 'Pas de connexion à OpenAI.' };
   }
 });
+
+// ---- ChatGPT with the user's own plan (Sign in with ChatGPT, no API key) ----
+const { createChatGPT } = require('./chatgpt.cjs');
+const chatgpt = createChatGPT({
+  dataDir,
+  settings,
+  // tests sign in against a fake server: follow its redirect here instead of opening the browser
+  openExternal: (url) => (process.env.MARCUUS_TEST_NO_BROWSER ? fetch(url).then(() => {}) : shell.openExternal(url)),
+  authBase: process.env.MARCUUS_CHATGPT_AUTH || undefined,
+  apiBase: process.env.MARCUUS_OPENAI_URL || undefined,
+  log: (line) => journal(line),
+});
+const chatgptCall = (fn) => async (...args) => {
+  try { return { ok: true, ...(await fn(...args)) }; } catch (e) { return { ok: false, code: e.code, error: e.message }; }
+};
+ipcMain.handle('chatgpt:signIn', chatgptCall(async () => {
+  const s = await chatgpt.signIn();
+  const win = BrowserWindow.getAllWindows()[0];
+  if (win) { if (win.isMinimized()) win.restore(); win.show(); app.focus({ steal: true }); }
+  return s;
+}));
+ipcMain.handle('chatgpt:cancelSignIn', () => chatgpt.cancelSignIn());
+ipcMain.handle('chatgpt:signOut', chatgptCall(() => chatgpt.signOut()));
+ipcMain.handle('chatgpt:status', () => chatgpt.status());
+ipcMain.handle('chatgpt:models', chatgptCall(async () => ({ models: await chatgpt.models() })));
+let chatgptAbort = null;
+ipcMain.handle('chatgpt:ask', async (_e, req) => {
+  chatgptAbort?.abort();
+  const ctrl = (chatgptAbort = new AbortController());
+  const timer = setTimeout(() => ctrl.abort('timeout'), 4 * 60_000);
+  try { return await chatgpt.ask(req, ctrl.signal); } finally {
+    clearTimeout(timer);
+    if (chatgptAbort === ctrl) chatgptAbort = null;
+  }
+});
+ipcMain.handle('chatgpt:cancel', () => chatgptAbort?.abort());
 
 // ---- local transcription (Whisper turbo on Apple MLX) --------------------
 // Engine = a private Python venv (uv) with mlx-whisper; model = mlx-community/whisper-large-v3-turbo.

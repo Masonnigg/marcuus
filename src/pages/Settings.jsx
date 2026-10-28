@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Check, ExternalLink, Eye, EyeOff, FolderOpen, RefreshCw, AlertCircle } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Check, ExternalLink, Eye, EyeOff, FolderOpen, RefreshCw, AlertCircle, Loader2, LogOut } from 'lucide-react';
 import { PageHeader, useToast } from '../App.jsx';
 import { kit } from '../lib/kit.js';
 import { DEFAULT_EXPRESSIONS } from '../lib/segment.js';
+import { hookEngineOf, CHATGPT_USAGE_URL } from '../lib/hook.js';
+import chatgptLogo from '../assets/chatgpt-logo-white.svg?inline';
 
 const SOURCES = [
   { id: 'pexels', name: 'Pexels', what: 'Vidéos', url: 'https://www.pexels.com/api/new/', steps: 'Optionnel : Pexels a suspendu les nouvelles clés. Sans clé, utilise le bouton « Pexels » dans B-roll.' },
@@ -11,7 +14,7 @@ const SOURCES = [
 
 export async function loadSettings() {
   const [s, d] = await Promise.all([kit.store.get('settings', {}), kit.defaults()]);
-  return { keys: {}, downloadsDir: d.downloadsDir, model: 'sonnet', hookEngine: 'claude', openaiModel: 'gpt-6.1-sol', expressions: DEFAULT_EXPRESSIONS, ...(s || {}) };
+  return { keys: {}, downloadsDir: d.downloadsDir, model: 'sonnet', openaiModel: 'gpt-6.1-sol', expressions: DEFAULT_EXPRESSIONS, ...(s || {}) };
 }
 
 export default function Settings() {
@@ -40,11 +43,18 @@ export default function Settings() {
       <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-10">
         <div className="flex max-w-3xl flex-col gap-4">
           <section className="card rise p-5">
+            <h2 className="mb-1 text-[14px] font-semibold">ChatGPT</h2>
+            <p className="mb-4 text-mute">Connecte ton compte ChatGPT : l’onglet Hook utilise ton forfait Plus ou Pro, sans clé API ni frais en plus de ton abonnement.</p>
+            <ChatGPTAccount s={s} save={save} />
+          </section>
+
+          {(claude?.loggedIn || s.hookEngine === 'claude') && (
+          <section className="card rise p-5">
             <div className="mb-1 flex items-center justify-between">
               <h2 className="text-[14px] font-semibold">Claude</h2>
               <button className="btn btn-ghost h-7 px-2" onClick={checkClaude}><RefreshCw size={12} /> Vérifier</button>
             </div>
-            <p className="mb-4 text-mute">Utilisé pour les idées de B-roll et l’onglet Hook. Passe par ton compte Claude (Claude Code), sans clé API ni coût en plus.</p>
+            <p className="mb-4 text-mute">Claude Code connecté sur ce Mac : idées de B-roll, « Affiner avec Claude » et, si tu le choisis, l’onglet Hook.</p>
             {!claude ? (
               <div className="skeleton h-9 rounded-lg" />
             ) : claude.loggedIn ? (
@@ -52,12 +62,8 @@ export default function Settings() {
                 <Check size={14} /> Connecté{claude.plan ? ` · ${claude.plan.toUpperCase()}` : ''}{claude.email ? ` · ${claude.email}` : ''}
               </div>
             ) : (
-              <div className="flex items-start gap-2 rounded-lg bg-warn/10 px-3 py-2 text-warn">
-                <AlertCircle size={14} className="mt-0.5 shrink-0" />
-                <div>
-                  {claude.installed ? 'Claude Code est installé mais pas connecté.' : 'Claude Code n’est pas installé.'}
-                  <div className="mt-1 text-mute">Dans le Terminal : <span className="kbd" data-selectable>{claude.installed ? 'claude' : 'curl -fsSL https://claude.ai/install.sh | bash'}</span> puis connecte-toi avec ton compte Claude.</div>
-                </div>
+              <div className="flex items-center gap-2 rounded-lg bg-warn/10 px-3 py-2 text-warn">
+                <AlertCircle size={14} className="shrink-0" /> Claude Code n’est pas connecté sur ce Mac.
               </div>
             )}
             <div className="mt-4 flex items-center gap-3">
@@ -69,6 +75,7 @@ export default function Settings() {
               </div>
             </div>
           </section>
+          )}
 
           <section className="card rise p-5" style={{ animationDelay: '20ms' }}>
             <h2 className="mb-1 text-[14px] font-semibold">Onglet Hook</h2>
@@ -76,8 +83,8 @@ export default function Settings() {
             <div className="flex items-center gap-3">
               <span className="text-mute">Analyse avec</span>
               <div className="seg">
-                {[['claude', 'Claude (ton abonnement)'], ['openai', 'ChatGPT (clé API)']].map(([id, l]) => (
-                  <button key={id} data-on={(s.hookEngine || 'claude') === id} onClick={() => save({ hookEngine: id })}>{l}</button>
+                {[['chatgpt', 'ChatGPT (ton forfait)'], ...(claude?.loggedIn || s.hookEngine === 'claude' ? [['claude', 'Claude Code']] : []), ['openai', 'Clé API OpenAI']].map(([id, l]) => (
+                  <button key={id} data-on={hookEngineOf(s, claude?.loggedIn) === id} onClick={() => save({ hookEngine: id })}>{l}</button>
                 ))}
               </div>
             </div>
@@ -189,5 +196,100 @@ export default function Settings() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Sign in with ChatGPT: OpenAI's own button and wording, the account, plan usage, model, sign out. */
+function ChatGPTAccount({ s, save }) {
+  const [st, setSt] = useState(null); // kit.chatgpt.status()
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [models, setModels] = useState(null);
+  const [welcome, setWelcome] = useState(false);
+  const refresh = () => kit.chatgpt.status().then(setSt);
+  useEffect(() => { refresh(); }, []);
+  useEffect(() => {
+    if (!st?.signedIn) return;
+    kit.chatgpt.models().then((r) => setModels(r.ok ? r.models : []));
+  }, [st?.signedIn]);
+
+  const signIn = async () => {
+    setBusy(true); setError(null);
+    const r = await kit.chatgpt.signIn();
+    setBusy(false);
+    if (!r.ok) { setError(r.error); return; }
+    setSt(r);
+    if (!(await kit.store.get('chatgptWelcomed', false))) setWelcome(true);
+  };
+  const signOut = async () => { setSt(await kit.chatgpt.signOut()); setModels(null); };
+
+  if (!st) return <div className="skeleton h-9 rounded-lg" />;
+  if (busy) {
+    return (
+      <div className="flex items-center gap-3 rounded-lg bg-panel-2 px-3 py-2">
+        <Loader2 size={14} className="animate-spin text-accent" />
+        <span className="flex-1">Termine la connexion dans ton navigateur…</span>
+        <button className="btn btn-ghost h-7 px-2 text-[12px]" onClick={() => kit.chatgpt.cancelSignIn()}>Annuler</button>
+      </div>
+    );
+  }
+  const button = (
+    <button onClick={signIn} className="flex h-10 items-center gap-2.5 rounded-full bg-black px-5 text-[13.5px] font-medium text-white ring-1 ring-white/20 transition-colors hover:bg-[#161616]">
+      <img src={chatgptLogo} alt="" className="size-[18px]" /> Continue with ChatGPT
+    </button>
+  );
+  const model = s.chatgptModel || st.model;
+  return (
+    <>
+      {!st.signedIn ? (
+        <div className="flex flex-col items-start gap-3">
+          {st.lost && <div className="flex items-center gap-2 rounded-lg bg-warn/10 px-3 py-2 text-warn"><AlertCircle size={14} /> Ta connexion ChatGPT a expiré : reconnecte-toi.</div>}
+          {button}
+          {error && <div className="flex items-center gap-2 rounded-lg bg-bad/10 px-3 py-2 text-[12px] text-bad"><AlertCircle size={13} /> {error}</div>}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2 rounded-lg bg-ok/10 px-3 py-2 text-ok">
+            <Check size={14} /> Connecté{st.email ? ` · ${st.email}` : ''}
+            <button className="btn btn-ghost ml-auto h-7 px-2 text-[12px] text-mute" onClick={signOut}><LogOut size={12} /> Se déconnecter</button>
+          </div>
+          {st.planUsage ? (
+            <div className="flex items-center gap-2 text-[12px] text-mute">
+              Les analyses utilisent ton forfait ChatGPT.
+              <button className="flex items-center gap-1 text-accent hover:underline" onClick={() => kit.open(CHATGPT_USAGE_URL)}>Gérer l’usage <ExternalLink size={11} /></button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 rounded-lg bg-warn/10 px-3 py-2 text-[12px] text-warn">
+              <AlertCircle size={13} className="shrink-0" />
+              <span className="flex-1">L’usage de ton forfait n’a pas été autorisé pour MARCUUS.</span>
+              <button className="btn h-7 px-2.5 text-[12px]" onClick={signIn}>Autoriser</button>
+            </div>
+          )}
+          <div className="flex items-center gap-3">
+            <span className="text-mute">Modèle</span>
+            {models === null ? <div className="skeleton h-8 w-48 rounded-lg" /> : (
+              <select className="field h-8 w-auto py-0" value={model} onChange={(e) => save({ chatgptModel: e.target.value })}>
+                {!models.some((m) => m.id === model) && <option value={model}>{model}</option>}
+                {models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            )}
+          </div>
+        </div>
+      )}
+      {welcome && createPortal( // on <body>: the card's entrance animation would trap a fixed overlay inside it
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 backdrop-blur-sm">
+          <div className="card w-[380px] p-6 text-center">
+            <img src={chatgptLogo} alt="" className="mx-auto mb-3 size-8" />
+            <div className="text-[15px] font-semibold">You’re using your ChatGPT plan</div>
+            <p className="mt-2 text-mute">Les analyses de l’onglet Hook utilisent maintenant ton forfait ChatGPT, sans frais en plus de ton abonnement. Tu peux fixer une limite pour MARCUUS dans ChatGPT › Réglages › Usage.</p>
+            <div className="mt-5 flex justify-center gap-2">
+              <button className="btn" onClick={() => kit.open(CHATGPT_USAGE_URL)}>Gérer l’usage <ExternalLink size={12} /></button>
+              <button className="btn btn-primary" onClick={() => { setWelcome(false); kit.store.set('chatgptWelcomed', true); }}>Got it</button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { FishingHook, Upload, Loader2, Check, AlertCircle, X, Play, Pause, Copy, RotateCcw, KeyRound, AudioLines, Clapperboard } from 'lucide-react';
+import { FishingHook, Upload, Loader2, Check, AlertCircle, X, Play, Pause, Copy, RotateCcw, KeyRound, AudioLines, Clapperboard, ExternalLink } from 'lucide-react';
 import { PageHeader, useToast } from '../App.jsx';
 import { kit } from '../lib/kit.js';
 import { wordsFromWhisper } from '../lib/transcribe.js';
-import { linesFromWords, buildHookRequest, parseHookReply, momentToText, fmtClock } from '../lib/hook.js';
+import { linesFromWords, buildHookRequest, parseHookReply, momentToText, fmtClock, hookEngineOf, CHATGPT_USAGE_URL } from '../lib/hook.js';
 import { premiereXml, parseProbe } from '../lib/premiere.js';
 import { Running, CopyLog } from './Transcribe.jsx';
 
@@ -22,7 +22,7 @@ export default function Hook({ active, input, goSettings, goTranscribe }) {
   const [sel, setSel] = useState(null);
   const [over, setOver] = useState(false);
   const [engineOk, setEngineOk] = useState(null);
-  const [ai, setAi] = useState(null); // { engine: 'claude' | 'openai', ok } — is the analyser set up?
+  const [ai, setAi] = useState(null); // { engine: 'chatgpt' | 'claude' | 'openai', ok } — is the analyser set up?
   const inputRef = useRef();
   const busy = useRef(false);
   const restored = useRef(false);
@@ -46,9 +46,11 @@ export default function Hook({ active, input, goSettings, goTranscribe }) {
 
   // the key and the engine can be set up in other tabs: re-check whenever this tab is shown
   useEffect(() => {
-    kit.store.get('settings', {}).then(async (s) => {
-      if (s?.hookEngine === 'openai') setAi({ engine: 'openai', ok: !!s?.keys?.openai?.trim() });
-      else setAi({ engine: 'claude', ok: (await kit.claude.status())?.loggedIn !== false });
+    Promise.all([kit.store.get('settings', {}), kit.claude.status()]).then(async ([s, claude]) => {
+      const engine = hookEngineOf(s, claude?.loggedIn);
+      if (engine === 'openai') setAi({ engine, ok: !!s?.keys?.openai?.trim() });
+      else if (engine === 'claude') setAi({ engine, ok: !!claude?.loggedIn });
+      else { const st = await kit.chatgpt.status(); setAi({ engine, ok: !!st?.signedIn && st.planUsage !== false }); }
     });
     kit.whisper?.status().then((s) => setEngineOk(!!(s?.supported !== false && s?.ffmpeg && s?.engine && s?.model)));
   }, [active]);
@@ -98,16 +100,21 @@ export default function Hook({ active, input, goSettings, goTranscribe }) {
     duration = duration || words.at(-1)?.end || 0;
     const lines = linesFromWords(words);
     if (!lines.length) { update(job.key, { state: 'error', failed: 'analyze', error: 'Aucune parole trouvée dans ce fichier.' }); return; }
-    // Claude = the user's own Claude subscription (default, no extra cost); ChatGPT = OpenAI API key
+    // ChatGPT = the person's own ChatGPT plan (Sign in with ChatGPT); Claude = Claude Code already connected on
+    // this Mac; or an OpenAI API key
     const s = (await kit.store.get('settings', {})) || {};
-    const engine = s.hookEngine === 'openai' ? 'openai' : 'claude';
+    const engine = hookEngineOf(s, (await kit.claude.status())?.loggedIn);
     const model = s.model || 'sonnet';
     update(job.key, { state: 'running', phase: 'analyze', engine, lines: lines.length, startedAt: Date.now() });
     const req = buildHookRequest(lines, duration);
-    const r = engine === 'openai' ? await kit.openai.ask(req) : await kit.claude.ask(req.user, model, { system: req.system, schema: req.schema });
+    const r = engine === 'chatgpt' ? await kit.chatgpt.ask(req)
+      : engine === 'openai' ? await kit.openai.ask(req)
+      : await kit.claude.ask(req.user, model, { system: req.system, schema: req.schema });
     if (r.ok && engine === 'claude') r.model = `Claude ${model}`;
+    if (r.ok && engine === 'chatgpt') r.model = `ChatGPT ${r.model}`;
     if (!r.ok) {
       if (r.code === 'nokey') setAi({ engine: 'openai', ok: false });
+      if (r.code === 'signin' || r.code === 'noplan') setAi({ engine: 'chatgpt', ok: false });
       update(job.key, { state: 'error', failed: 'analyze', code: r.code, error: r.error });
       return;
     }
@@ -139,7 +146,7 @@ export default function Hook({ active, input, goSettings, goTranscribe }) {
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setOver(false); }}
       onDrop={(e) => { e.preventDefault(); setOver(false); addFiles(e.dataTransfer.files); }}
     >
-      <PageHeader title="Hook" sub="MP3 ou vidéo → le hook pour ouvrir le Reel, le body à garder, des titres et la légende. Analyse par Claude ou ChatGPT (Réglages).">
+      <PageHeader title="Hook" sub="MP3 ou vidéo → le hook pour ouvrir le Reel, le body à garder, des titres et la légende. Analyse avec ton compte ChatGPT (Réglages).">
         <input ref={inputRef} type="file" multiple hidden accept="video/*,audio/*,.mxf" onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
         {jobs.length > 0 && <button className="btn" onClick={() => inputRef.current.click()}><Upload size={14} /> Ajouter des fichiers</button>}
       </PageHeader>
@@ -147,9 +154,9 @@ export default function Hook({ active, input, goSettings, goTranscribe }) {
       <div className="flex min-h-0 flex-1 flex-col gap-3 px-8 pb-6">
         {ai?.ok === false && (
           <Banner icon={KeyRound} action="Ouvrir Réglages" onAction={goSettings}>
-            {ai.engine === 'openai'
-              ? 'Ajoute ta clé OpenAI dans Réglages pour lancer les analyses, ou choisis Claude.'
-              : 'Claude n’est pas connecté sur ce Mac. Regarde dans Réglages.'}
+            {ai.engine === 'chatgpt' ? 'Connecte ton compte ChatGPT dans Réglages pour lancer les analyses.'
+              : ai.engine === 'openai' ? 'Ajoute ta clé OpenAI dans Réglages pour lancer les analyses, ou connecte ton compte ChatGPT.'
+              : 'Claude Code n’est pas connecté sur ce Mac. Choisis ChatGPT dans Réglages.'}
           </Banner>
         )}
         {engineOk === false && (
@@ -192,6 +199,10 @@ export default function Hook({ active, input, goSettings, goTranscribe }) {
                     <div className="mt-4 flex justify-center gap-2">
                       {job.code === 'nokey' ? (
                         <button className="btn btn-primary" onClick={goSettings}><KeyRound size={13} /> Ajouter la clé</button>
+                      ) : job.code === 'signin' || job.code === 'noplan' ? (
+                        <button className="btn btn-primary" onClick={goSettings}><KeyRound size={13} /> Ouvrir Réglages</button>
+                      ) : job.code === 'limit' ? (
+                        <button className="btn btn-primary" onClick={() => kit.open(CHATGPT_USAGE_URL)}><ExternalLink size={13} /> Gérer l’usage</button>
                       ) : null}
                       <button className="btn" onClick={() => reanalyze(job)}><RotateCcw size={13} /> {job.failed === 'transcribe' ? 'Réessayer' : 'Relancer l’analyse'}</button>
                       {job.failed === 'transcribe' && <CopyLog />}
@@ -255,9 +266,10 @@ function Analyzing({ job }) {
     <div className="grid flex-1 place-items-center">
       <div className="w-80 text-center">
         <Loader2 className="mx-auto mb-3 animate-spin text-accent" />
-        <div className="font-medium">{job.engine === 'openai' ? 'ChatGPT' : 'Claude'} cherche le hook…</div>
+        <div className="font-medium">{job.engine === 'claude' ? 'Claude' : 'ChatGPT'} cherche le hook…</div>
         <div className="mt-1 text-[11.5px] text-faint">{job.lines} phrases · {secs}s</div>
-        <button className="btn btn-ghost mt-4" onClick={() => (job.engine === 'openai' ? kit.openai.cancel() : kit.claude.cancel())}>Annuler</button>
+        {job.engine === 'chatgpt' && <PlanNote className="mt-2 justify-center" />}
+        <button className="btn btn-ghost mt-4" onClick={() => (job.engine === 'chatgpt' ? kit.chatgpt.cancel() : job.engine === 'openai' ? kit.openai.cancel() : kit.claude.cancel())}>Annuler</button>
       </div>
     </div>
   );
@@ -313,6 +325,7 @@ function Results({ job, onReanalyze }) {
           <div className="text-[11.5px] text-faint">
             {job.moments.length} moment{job.moments.length > 1 ? 's' : ''} · audio de {fmtClock(job.duration || 0)}{job.model ? ` · ${job.model}` : ''}
           </div>
+          {job.engine === 'chatgpt' && <PlanNote className="mt-0.5" />}
         </div>
         <div className="ml-auto flex items-center gap-2">
           <button className="btn" onClick={onReanalyze}><RotateCcw size={13} /> Relancer l’analyse</button>
@@ -327,6 +340,16 @@ function Results({ job, onReanalyze }) {
         </div>
       </div>
     </>
+  );
+}
+
+// shown wherever an analysis uses the person's ChatGPT plan, as OpenAI's guidelines ask
+function PlanNote({ className = '' }) {
+  return (
+    <div className={`flex items-center gap-1.5 text-[11.5px] text-faint ${className}`}>
+      Ton forfait ChatGPT ·
+      <button className="flex items-center gap-1 text-accent hover:underline" onClick={() => kit.open(CHATGPT_USAGE_URL)}>Gérer l’usage <ExternalLink size={10} /></button>
+    </div>
   );
 }
 

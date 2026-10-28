@@ -23,7 +23,9 @@ check('a long run without punctuation is cut at 35 words', linesFromWords(say(Ar
 const req = buildHookRequest(lines, 15000);
 check('short audio asks for exactly 1 moment', /exactement 1 moment/.test(req.system));
 check('lines are numbered with their time', req.user.includes('L4 [0:08] Et l\'année dernière'), req.user);
-check('long audio asks for several moments', /entre 2 et 5 moments/.test(buildHookRequest(lines, 40 * 60_000).system) && /Trouve 2 moments/.test(buildHookRequest(lines, 160_000).system));
+const longReq = buildHookRequest(lines, 40 * 60_000);
+check('long audio asks for several different moments', /jusqu’à 5 moments/.test(longReq.system) && /jusqu’à 2 moments/.test(buildHookRequest(lines, 160_000).system)
+  && /VRAIMENT DIFFÉRENTS/.test(longReq.system) && !/VRAIMENT DIFFÉRENTS/.test(req.system));
 check('schema is strict-ready (no extra fields, all required)', JSON.stringify(req.schema).includes('"additionalProperties":false'));
 
 const reply = {
@@ -84,7 +86,21 @@ check('a quote not in the transcript is never the hook', scored([
 ]).hook.from === 3);
 const split = scored([cand(4, "j'ai fait 2 millions", 5, 5, 5)], undefined, [{ from: 2, to: 6, summary: 'tout' }]);
 check('body never repeats the hook lines', split.body.map((x) => `${x.from}-${x.to}`).join(',') === '2-3,5-6', JSON.stringify(split.body.map((x) => [x.from, x.to])));
-check('schema asks for scored candidates before the hook', JSON.stringify(req.schema).indexOf('"candidates"') < JSON.stringify(req.schema).indexOf('"hook"') && /total = 2 × stop/.test(req.system));
+// long audio: an earlier (better) moment owns its lines
+const L = 40 * 60_000;
+const mom = (cands, body, title) => ({ message: title, title, candidates: cands, hook: { from: 1, to: 1, quote: 'Bon' }, body, headlines: [], caption: '' });
+const two = parseHookReply({ moments: [
+  mom([cand(4, "l'année dernière j'ai fait 2 millions de chiffre d'affaires", 5, 5, 5)], [{ from: 2, to: 3, summary: 'a' }], 'A'),
+  mom([cand(4, "l'année dernière j'ai fait 2 millions de chiffre d'affaires", 5, 5, 5)], [{ from: 5, to: 6, summary: 'b' }], 'B'), // same hook again
+] }, lines, { durationMs: L });
+check('a second moment with the same hook is dropped', two.length === 1 && two[0].title === 'A', two.map((x) => x.title).join(','));
+const next = parseHookReply({ moments: [
+  mom([cand(4, "l'année dernière j'ai fait 2 millions de chiffre d'affaires", 5, 5, 5)], [{ from: 2, to: 3, summary: 'a' }], 'A'),
+  mom([cand(4, "l'année dernière j'ai fait 2 millions", 5, 5, 5), cand(5, "Le secret, c'est pas l'argent.", 4, 4, 4)], [{ from: 3, to: 6, summary: 'b' }], 'B'),
+] }, lines, { durationMs: L });
+check('a used candidate is skipped, the next best becomes the hook', next.length === 2 && next[1].hook.from === 5, JSON.stringify(next.map((x) => x.hook.from)));
+check('a moment never takes lines from another one', next[1].body.map((x) => `${x.from}-${x.to}`).join(',') === '6-6', JSON.stringify(next[1].body.map((x) => [x.from, x.to])));
+check('schema asks for scored candidates before the hook', JSON.stringify(req.schema).indexOf('"message"') < JSON.stringify(req.schema).indexOf('"candidates"') && JSON.stringify(req.schema).indexOf('"candidates"') < JSON.stringify(req.schema).indexOf('"hook"') && /total = 2 × stop/.test(req.system));
 
 const txt = momentToText(m, 0);
 check('copy text has hook, body, titles and caption', /HOOK \(0:08 → 0:10\)/.test(txt) && txt.includes('BODY') && txt.includes('- Le vrai secret') && txt.includes('LÉGENDE'), txt);

@@ -19,6 +19,15 @@ contextBridge.exposeInMainWorld('kit', {
   stock: { search: call('stock:search'), download: call('stock:download') },
   openai: { ask: call('openai:ask'), cancel: call('openai:cancel'), status: call('openai:status') },
   probe: call('media:probe'),
+  chatgpt: {
+    signIn: call('chatgpt:signIn'),
+    cancelSignIn: call('chatgpt:cancelSignIn'),
+    signOut: call('chatgpt:signOut'),
+    status: call('chatgpt:status'),
+    models: call('chatgpt:models'),
+    ask: call('chatgpt:ask'),
+    cancel: call('chatgpt:cancel'),
+  },
   version: call('app:version'),
   update: {
     check: call('update:check'),

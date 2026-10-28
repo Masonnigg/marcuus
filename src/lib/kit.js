@@ -34,6 +34,15 @@ const mock = {
     status: async () => ({ ok: false, error: 'Disponible uniquement dans l’app MARCUUS.' }),
   },
   probe: async () => { throw new Error('Disponible uniquement dans l’app MARCUUS.'); },
+  chatgpt: {
+    signIn: async () => ({ ok: false, error: 'Disponible uniquement dans l’app MARCUUS.' }),
+    cancelSignIn: async () => {},
+    signOut: async () => ({ ok: true, signedIn: false }),
+    status: async () => ({ signedIn: false }),
+    models: async () => ({ ok: false, error: 'Disponible uniquement dans l’app MARCUUS.' }),
+    ask: async () => ({ ok: false, error: 'Disponible uniquement dans l’app MARCUUS.' }),
+    cancel: async () => {},
+  },
   version: async () => 'dev',
   update: { check: async () => null, install: async () => {}, openPage: async () => {}, onProgress: () => () => {}, onAvailable: () => () => {} },
   stock: {

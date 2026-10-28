@@ -14,7 +14,7 @@
     "dist": "vite build && electron-builder --mac",
     "dist:dir": "vite build && electron-builder --mac --dir --arm64",
     "predist": "node scripts/fetch-vendor.mjs",
-    "test": "node scripts/test-srt.mjs && node scripts/test-segment.mjs && node scripts/test-hook.mjs && node scripts/test-premiere.mjs",
+    "test": "node scripts/test-srt.mjs && node scripts/test-segment.mjs && node scripts/test-hook.mjs && node scripts/test-premiere.mjs && node scripts/test-chatgpt.mjs",
     "release": "node scripts/release.mjs"
   },
   "build": {
