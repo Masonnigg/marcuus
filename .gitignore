@@ -1,0 +1,8 @@
+node_modules/
+dist/
+release/
+.DS_Store
+*.log
+# bundled tools are fetched by scripts/fetch-vendor.mjs before each build
+vendor/*/bin/*
+!vendor/*/bin/.keep

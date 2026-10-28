@@ -1,0 +1,35 @@
+MARCUUS — installation
+======================
+
+1. INSTALLER
+   Glisse MARCUUS dans le dossier Applications (la flèche à droite).
+
+   Quel fichier ?
+   - Mac avec puce Apple (M1, M2, M3, M4…) : MARCUUS-…-arm64.dmg
+   - Mac Intel (avant 2020) : MARCUUS-…-x64.dmg
+     (sur Intel, l'onglet Transcrire n'est pas disponible)
+   Pour savoir : menu Pomme  > À propos de ce Mac > « Puce » ou « Processeur ».
+
+2. PREMIÈRE OUVERTURE
+   MARCUUS n'est pas vendu sur l'App Store, donc macOS demande une confirmation la première fois :
+   a. Double-clique sur MARCUUS. Un message dit qu'il n'a pas pu être vérifié : clique sur « Terminé ».
+   b. Ouvre Réglages Système > Confidentialité et sécurité, descends en bas :
+      clique sur « Ouvrir quand même » à côté de MARCUUS, puis confirme.
+   C'est à faire une seule fois.
+
+   Si macOS dit que l'app est « endommagée » : ouvre le Terminal et colle
+       xattr -dr com.apple.quarantine /Applications/MARCUUS.app
+   puis relance MARCUUS.
+
+3. TRANSCRIRE (Mac à puce Apple)
+   Onglet Transcrire > « Installer » : télécharge le moteur et le modèle Whisper
+   (environ 2,6 Go, quelques minutes, une seule fois). Ensuite tout marche hors-ligne.
+
+4. B-ROLL
+   - Idées de plans : installe Claude Code et connecte ton compte Claude.
+     Dans le Terminal :  curl -fsSL https://claude.ai/install.sh | bash
+     puis tape  claude  et choisis « Claude account with subscription ».
+     Sans Claude Code, utilise le bouton « Copier le prompt » et colle-le dans claude.ai.
+   - Recherche de vidéos : Réglages > ajoute une clé Pixabay gratuite (pixabay.com/api/docs).
+
+Tout (palettes, réglages, transcriptions) est stocké uniquement sur ce Mac.

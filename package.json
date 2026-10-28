@@ -1,0 +1,99 @@
+{
+  "name": "edit-kit",
+  "productName": "MARCUUS",
+  "version": "1.0.8",
+  "description": "Mac app for short-form video editing: on-device French captions, SRT fixer, B-roll finder, Reel hook finder with Premiere export",
+  "license": "GPL-3.0-only",
+  "main": "electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "start": "vite build && electron .",
+    "test:srt": "node scripts/test-srt.mjs",
+    "dist": "vite build && electron-builder --mac",
+    "dist:dir": "vite build && electron-builder --mac --dir --arm64",
+    "predist": "node scripts/fetch-vendor.mjs",
+    "test": "node scripts/test-srt.mjs && node scripts/test-segment.mjs && node scripts/test-hook.mjs && node scripts/test-premiere.mjs",
+    "release": "node scripts/release.mjs"
+  },
+  "build": {
+    "appId": "com.reda.marcuus",
+    "productName": "MARCUUS",
+    "files": [
+      "dist/**",
+      "electron/**",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.video",
+      "icon": "build/icon.icns",
+      "identity": "-",
+      "extraResources": [
+        {
+          "from": "vendor/${arch}/bin",
+          "to": "bin",
+          "filter": [
+            "**/*",
+            "!.keep"
+          ]
+        }
+      ],
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "directories": {
+      "output": "release"
+    },
+    "asarUnpack": [
+      "electron/engine/**"
+    ],
+    "artifactName": "MARCUUS-${version}-${arch}.${ext}",
+    "dmg": {
+      "title": "MARCUUS",
+      "window": {
+        "width": 560,
+        "height": 420
+      },
+      "contents": [
+        {
+          "x": 140,
+          "y": 170
+        },
+        {
+          "x": 420,
+          "y": 170,
+          "type": "link",
+          "path": "/Applications"
+        },
+        {
+          "x": 280,
+          "y": 320,
+          "type": "file",
+          "path": "build/LISEZ-MOI.txt"
+        }
+      ]
+    }
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
+    "ffmpeg-static": "^5.3.0",
+    "lucide-react": "^1.54.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.3.4"
+  }
+}

@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0b0b0d;
+  --color-panel: #121215;
+  --color-panel-2: #18181c;
+  --color-line: #24242a;
+  --color-line-2: #303038;
+  --color-ink: #ededf0;
+  --color-mute: #8d8d97;
+  --color-faint: #5c5c66;
+  --color-accent: #ff6a3d;
+  --color-accent-2: #ff8a63;
+  --color-ok: #4ade80;
+  --color-warn: #fbbf24;
+  --color-bad: #f87171;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace;
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  overflow: hidden;
+}
+input, textarea, [data-selectable] { user-select: text; }
+::selection { background: color-mix(in srgb, var(--color-accent) 40%, transparent); }
+
+.drag { -webkit-app-region: drag; }
+.no-drag { -webkit-app-region: no-drag; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #2a2a31; border-radius: 10px; border: 3px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background-color: #3a3a44; }
+::-webkit-scrollbar-track { background: transparent; }
+
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes pop { 0% { transform: scale(1); } 40% { transform: scale(0.94); } 100% { transform: scale(1); } }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 10px) scale(0.96); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
+@keyframes shimmer { from { background-position: -200% 0; } to { background-position: 200% 0; } }
+
+.rise { animation: rise 0.45s var(--ease-out-expo) both; }
+.pop { animation: pop 0.28s var(--ease-out-expo); }
+.skeleton {
+  background: linear-gradient(90deg, #17171b 25%, #202026 50%, #17171b 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 30px; padding: 0 12px; border-radius: 8px;
+  font-weight: 500; font-size: 12.5px; white-space: nowrap;
+  background: var(--color-panel-2); border: 1px solid var(--color-line);
+  color: var(--color-ink);
+  transition: background 0.15s, border-color 0.15s, transform 0.15s var(--ease-out-expo), opacity 0.15s;
+}
+.btn:hover { background: #1f1f24; border-color: var(--color-line-2); }
+.btn:active { transform: scale(0.97); }
+.btn:disabled { opacity: 0.4; pointer-events: none; }
+.btn-primary { background: var(--color-accent); border-color: transparent; color: #140802; }
+.btn-primary:hover { background: var(--color-accent-2); border-color: transparent; }
+.btn-ghost { background: transparent; border-color: transparent; color: var(--color-mute); }
+.btn-ghost:hover { background: var(--color-panel-2); color: var(--color-ink); border-color: transparent; }
+.btn-icon { width: 30px; padding: 0; justify-content: center; }
+
+.field {
+  height: 32px; padding: 0 10px; border-radius: 8px;
+  background: var(--color-bg); border: 1px solid var(--color-line);
+  color: var(--color-ink); outline: none; font-size: 12.5px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.field:focus { border-color: var(--color-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent); }
+textarea.field { height: auto; padding: 8px 10px; line-height: 1.5; resize: vertical; }
+
+.seg { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--color-bg); border: 1px solid var(--color-line); }
+.seg button { height: 24px; padding: 0 10px; border-radius: 6px; font-size: 12px; color: var(--color-mute); transition: background 0.15s, color 0.15s; }
+.seg button[data-on="true"] { background: var(--color-panel-2); color: var(--color-ink); box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset, 0 1px 2px rgba(0,0,0,0.4); }
+
+.card { background: var(--color-panel); border: 1px solid var(--color-line); border-radius: 14px; }
+.kbd { font-family: var(--font-mono); font-size: 11px; padding: 1px 5px; border-radius: 4px; background: var(--color-panel-2); border: 1px solid var(--color-line); color: var(--color-mute); }
