@@ -128,7 +128,8 @@ function createChatGPT({ dataDir, openExternal, settings, authBase = 'https://au
   async function signIn() {
     pending?.cancel('Nouvelle connexion lancée.');
     const a = load();
-    const hostId = a.hostId || crypto.randomUUID();
+    // one stable ID per Mac, in the URN form OpenAI expects (a bare UUID is refused)
+    const hostId = /^urn:uuid:/.test(a.hostId || '') ? a.hostId : `urn:uuid:${crypto.randomUUID()}`;
     const reauth = a.clientId && a.lost; // session expired: re-authorise the same registration
     const { verifier, challenge } = pkce();
     const state = random();

@@ -1,7 +1,7 @@
 {
   "name": "edit-kit",
   "productName": "MARCUUS",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Mac app for short-form video editing: on-device French captions, SRT fixer, B-roll finder, Reel hook finder with Premiere export",
   "license": "GPL-3.0-only",
   "main": "electron/main.cjs",

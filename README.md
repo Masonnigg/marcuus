@@ -5,7 +5,8 @@ Mac app for editing short-form videos (French captions):
 - **Transcrire**: video/audio → captions, on-device (Whisper large-v3-turbo on Apple MLX). Caption editor with per-caption playback, doubtful-word review, find & replace, "Affiner avec Claude".
 - **SRT Fixer**: rejoins words split by auto-captioners (TurboScribe…) and re-splits captions by grammar (1–2 words per line).
 - **B-roll**: Claude suggests shots per moment, searches Pixabay/Pexels videos; Envato / Pexels / Mixkit links.
-- **Hook**: an MP3 or a video → the sentence that should open the Reel, the passages to keep, 3 on-screen titles and a caption. The AI scores several candidate hooks and the app keeps the best one. **Premiere** button: a vertical sequence already cut (hook, then body) to drag into Premiere.
+- **Hook**: an MP3 or a video → the sentence that should open the Reel, the passages to keep, 3 on-screen titles and a caption. The AI scores several candidate hooks and the app keeps the best one; a long recording gives several Reels, each with a different message. **Premiere** button: a vertical sequence already cut (hook, then body) to drag into Premiere.
+  Analyses run on the user's own ChatGPT Plus/Pro plan with **Continue with ChatGPT** (OpenAI's Sign in with ChatGPT, no API key), or an OpenAI API key, or Claude Code if it is already set up on the Mac.
 - **Palettes**: click-to-copy colour palettes, extract from an image.
 
 Electron + React (Vite) + Tailwind. UI in French.

@@ -115,6 +115,7 @@ check('sign-in: connected, email from the verified ID token, plan usage granted'
 check('loopback redirect on 127.0.0.1:1455 (never localhost)', /^http:\/\/127\.0\.0\.1:\d+\/auth\/callback$/.test(st.lastAuthorize.redirect_uri) && !st.lastAuthorize.redirect_uri.includes('localhost'), st.lastAuthorize.redirect_uri);
 const saved = JSON.parse(readFileSync(authFile, 'utf8'));
 check('tokens saved only for this user (file 0600), issued client kept', (statSync(authFile).mode & 0o777) === 0o600 && saved.clientId === 'oaiapp_test' && saved.hostId === st.lastAuthorize.ext_agent_host_id);
+check('host ID is a urn:uuid, the same at the next sign-in', /^urn:uuid:[0-9a-f-]{36}$/.test(saved.hostId), saved.hostId);
 
 check('models: only the listed ones', JSON.stringify(await cg.models()) === JSON.stringify([{ id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' }]));
 
@@ -153,6 +154,7 @@ const r4 = await cg.ask(req);
 const lost = cg.status();
 check('dead refresh token → “reconnecte-toi”, account remembered for the hint', !r4.ok && r4.code === 'signin' && !lost.signedIn && lost.lost && lost.email === 'test@example.com', JSON.stringify({ r4, lost }));
 const s2 = await cg.signIn();
+check('same Mac → same host ID', st.lastAuthorize.ext_agent_host_id === saved.hostId);
 check('re-sign-in reuses the issued client with id_token/login hints', s2.signedIn && st.lastAuthorize.client_id === 'oaiapp_test' && st.lastAuthorize.login_hint === 'test@example.com' && !!st.lastAuthorize.id_token_hint, JSON.stringify(st.lastAuthorize));
 
 const rt = JSON.parse(readFileSync(authFile, 'utf8')).refreshToken;
