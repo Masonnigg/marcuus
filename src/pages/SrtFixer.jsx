@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FileText, Upload, Save, Copy, Clapperboard, X, ArrowRight, Check, FolderOpen, Wand2, Sparkles, Loader2, Scissors, RotateCcw } from 'lucide-react';
 import { PageHeader, useToast } from '../App.jsx';
+import { useBatchSelect, BatchButtons, Tick } from '../components/BatchSelect.jsx';
 import { kit } from '../lib/kit.js';
 import { fixSrtText, fmtTime, FIX_TYPES, serializeSrt } from '../lib/srt.js';
 import { unitsFromCues, segmentUnits, groupsToCues, groupsFromCues, splitChanges, inferTarget, enforceLimits, DEFAULT_EXPRESSIONS } from '../lib/segment.js';
@@ -31,6 +32,8 @@ export default function SrtFixer({ onSendToBroll, input }) {
   const [settings, setSettings] = useState({ expressions: DEFAULT_EXPRESSIONS, model: 'sonnet' });
   const [refining, setRefining] = useState(null); // file key while Claude works
   const [over, setOver] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const batch = useBatchSelect(files);
   const inputRef = useRef();
 
   useEffect(() => {
@@ -139,10 +142,18 @@ export default function SrtFixer({ onSendToBroll, input }) {
     return saved;
   };
 
-  const saveAll = async () => {
+  // one by one; those that fail stay selected to try again
+  const saveMany = async (list) => {
+    setSaving(true);
     let n = 0;
-    for (const f of files) if (await saveOne(f)) n++;
-    notify(`${n} fichier${n > 1 ? 's' : ''} enregistré${n > 1 ? 's' : ''}`);
+    const failed = [];
+    for (const f of list) {
+      try { if (await saveOne(f)) n++; } catch { failed.push(f); }
+    }
+    setSaving(false);
+    notify(`${n} fichier${n > 1 ? 's' : ''} enregistré${n > 1 ? 's' : ''}${failed.length ? ` · ${failed.length} en échec` : ''}`, { tone: failed.length ? 'bad' : undefined });
+    if (failed.length) batch.keep(failed);
+    else batch.stop();
   };
 
   const remove = (key) => {
@@ -161,8 +172,9 @@ export default function SrtFixer({ onSendToBroll, input }) {
     >
       <PageHeader title="SRT Fixer" sub="Recolle les mots coupés entre deux sous-titres : c'est, j'ai, moment-là, 10 000, 1%…">
         <input ref={inputRef} type="file" accept=".srt" multiple hidden onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
-        <button className="btn" onClick={() => inputRef.current.click()}><Upload size={14} /> Ouvrir .srt</button>
-        {files.length > 1 && <button className="btn btn-primary" onClick={saveAll}><Save size={14} /> Tout enregistrer ({files.length})</button>}
+        {!batch.on && <button className="btn" onClick={() => inputRef.current.click()}><Upload size={14} /> Ouvrir .srt</button>}
+        <BatchButtons batch={batch} label="Enregistrer" busy={saving} onRun={() => saveMany(batch.picked)} />
+        {!batch.on && files.length > 1 && <button className="btn btn-primary" disabled={saving} onClick={() => saveMany(files)}><Save size={14} /> Tout enregistrer ({files.length})</button>}
       </PageHeader>
 
       {files.length === 0 ? (
@@ -176,11 +188,11 @@ export default function SrtFixer({ onSendToBroll, input }) {
               return (
                 <button
                   key={f.key}
-                  onClick={() => setSel(f.key)}
-                  className={`group relative rounded-xl border p-3 text-left transition-colors ${f.key === sel ? 'border-line-2 bg-panel-2' : 'border-transparent hover:bg-panel'}`}
+                  onClick={() => (batch.on ? batch.toggle(f.key) : setSel(f.key))}
+                  className={`group relative rounded-xl border p-3 text-left transition-colors ${(batch.on ? batch.picked.includes(f) : f.key === sel) ? 'border-line-2 bg-panel-2' : 'border-transparent hover:bg-panel'}`}
                 >
                   <div className="flex items-start gap-2">
-                    <FileText size={15} className={`mt-px shrink-0 ${f.key === sel ? 'text-accent' : 'text-faint'}`} />
+                    {batch.on ? <Tick on={batch.picked.includes(f)} /> : <FileText size={15} className={`mt-px shrink-0 ${f.key === sel ? 'text-accent' : 'text-faint'}`} />}
                     <div className="min-w-0 flex-1">
                       <div className="truncate pr-4 text-[12.5px] font-medium">{f.name.replace(/\.srt$/i, '')}</div>
                       <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-mute">
@@ -189,13 +201,15 @@ export default function SrtFixer({ onSendToBroll, input }) {
                       </div>
                     </div>
                   </div>
-                  <span
-                    role="button"
-                    onClick={(e) => { e.stopPropagation(); remove(f.key); }}
-                    className="absolute top-2.5 right-2 rounded p-0.5 text-faint opacity-0 group-hover:opacity-100 hover:text-ink"
-                  >
-                    <X size={13} />
-                  </span>
+                  {!batch.on && (
+                    <span
+                      role="button"
+                      onClick={(e) => { e.stopPropagation(); remove(f.key); }}
+                      className="absolute top-2.5 right-2 rounded p-0.5 text-faint opacity-0 group-hover:opacity-100 hover:text-ink"
+                    >
+                      <X size={13} />
+                    </span>
+                  )}
                 </button>
               );
             })}

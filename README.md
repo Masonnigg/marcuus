@@ -16,7 +16,7 @@ Electron + React (Vite) + Tailwind. UI in French.
 ```bash
 npm install
 npm run start          # build + run
-npm test               # SRT fixer, caption splitting, hook and Premiere export tests
+npm test               # SRT fixer, caption splitting, hook, Premiere export, ChatGPT sign-in and update tests
 ```
 
 ## Build installers
@@ -39,6 +39,11 @@ npm run release -- "Ce qui change dans cette version"
 `scripts/release.mjs` runs the tests, builds both DMGs and update zips, publishes them as a
 GitHub Release in the public repo [Masonnigg/marcuus-releases](https://github.com/Masonnigg/marcuus-releases),
 then updates `latest.json` there (last, so no Mac sees a version before its files exist) and tags this repo.
+
+Updates are light: between two builds only MARCUUS's own code and the small launchers change (about 0.5 MB zipped), so each
+release also ships a `.patch.zip` with just those files (`electron/update-files.cjs`). An installed app uses it when the rest of
+its bundle matches the release's fingerprint, and checks that the result is byte-identical to the published build before
+restarting. Otherwise, or if anything fails, it downloads the full zip, over 8 connections and resumable.
 
 Installed apps read `latest.json` on launch and every hour. If it lists a newer version, the app is
 locked behind a "Mise à jour requise" screen; one click downloads the zip (curl), checks its SHA-256 and

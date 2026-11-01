@@ -8,6 +8,20 @@ import { segmentUnits, groupsToCues } from './segment.js';
 export const DOUBT = 0.7;
 const isDoubtful = (u) => (u.p ?? 1) < DOUBT && !/^[\d\s%€$£.,:;!?…-]+$/.test(u.text);
 
+/**
+ * Where a job's .srt goes: its own earlier export, else next to the media. Never an existing .srt it didn't write
+ * (e.g. a TurboScribe one), nor a path in `taken` (clip.mp4 + clip.mp3 exported together must not share a file).
+ */
+export async function srtTarget(job, exists, taken = new Set()) {
+  if (job.savedTo) return job.savedTo;
+  const base = job.path.replace(/\.[^./]+$/, '');
+  if (!taken.has(`${base}.srt`) && !(await exists(`${base}.srt`))) return `${base}.srt`;
+  for (let n = 1; ; n++) {
+    const p = `${base} - MARCUUS${n > 1 ? ` ${n}` : ''}.srt`;
+    if (!taken.has(p)) return p;
+  }
+}
+
 export function wordsFromWhisper(result) {
   const words = [];
   const duration = result?.duration; // ms, from the engine (since 1.0.5)

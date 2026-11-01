@@ -522,7 +522,6 @@ ipcMain.handle('whisper:transcribe', async (e, filePath, opts = {}) => {
 
 const UPDATE_URL = process.env.MARCUUS_UPDATE_URL || 'https://raw.githubusercontent.com/Masonnigg/marcuus-releases/main/latest.json';
 const RELEASES_PAGE = 'https://github.com/Masonnigg/marcuus-releases/releases/latest';
-const crypto = require('node:crypto');
 
 const cmpVersion = (a, b) => {
   const pa = String(a).split('.').map(Number);
@@ -551,6 +550,38 @@ ipcMain.handle('app:version', () => app.getVersion());
 ipcMain.handle('update:check', async () => { const u = await checkForUpdate(); return u ? publicUpdate(u) : null; });
 ipcMain.handle('update:openPage', () => shell.openExternal(RELEASES_PAGE));
 
+const { frozenDigest, fullDigest, applyPatch, download, sha256File, removeTree } = require('./update-files.cjs');
+const updateTool = (bin) => (args) => runProc(bin, args, { tag: 'update', idleMs: 0 });
+const curl = updateTool('/usr/bin/curl');
+const ditto = (src, dest) => updateTool('/usr/bin/ditto')([src, dest]);
+
+// a download survives a restart: its chunks stay here until the file checks out
+async function fetchVerified(asset, dest, send) {
+  const cacheRoot = path.join(dataDir(), 'update-cache');
+  const cacheDir = path.join(cacheRoot, asset.sha256.slice(0, 16));
+  for (const d of fs.existsSync(cacheRoot) ? fs.readdirSync(cacheRoot) : []) {
+    if (path.join(cacheRoot, d) !== cacheDir) fs.rmSync(path.join(cacheRoot, d), { recursive: true, force: true });
+  }
+  await download({ url: asset.url, size: asset.size, dest, cacheDir, curl, onProgress: (got) => send({ stage: 'download', got, total: asset.size }) });
+  const ok = (await sha256File(dest)) === asset.sha256;
+  fs.rmSync(cacheDir, { recursive: true, force: true });
+  if (!ok) throw new Error('Fichier corrompu (checksum). Réessaie.');
+}
+
+// only the files that changed: the result must be byte-identical to the full build, or nothing is installed
+async function lightUpdate(bundle, patch, tmp, newApp, send) {
+  send({ stage: 'check' });
+  if ((await frozenDigest(bundle)) !== patch.base) return false; // Electron or a bundled tool changed
+  const zip = path.join(tmp, 'patch.zip');
+  await fetchVerified(patch, zip, send);
+  send({ stage: 'unpack' });
+  const files = path.join(tmp, 'patch');
+  await updateTool('/usr/bin/ditto')(['-x', '-k', zip, files]);
+  await applyPatch(bundle, files, newApp, ditto);
+  if ((await fullDigest(newApp)) !== patch.full) throw new Error('résultat différent de la version publiée');
+  return true;
+}
+
 ipcMain.handle('update:install', async (e) => {
   const u = pendingUpdate;
   if (!u) throw new Error('Aucune mise à jour en attente.');
@@ -564,26 +595,27 @@ ipcMain.handle('update:install', async (e) => {
   // 1. download with macOS's curl (Electron's fetch can crash on large streamed downloads).
   //    Files curl writes aren't quarantined, so there's no Gatekeeper prompt after the update.
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'marcuus-update-'));
-  const zip = path.join(tmp, 'MARCUUS.zip');
-  const total = asset.size || 0;
-  const poll = setInterval(() => {
-    try { send({ stage: 'download', got: fs.statSync(zip).size, total }); } catch {}
-  }, 250);
-  try {
-    await runProc('/usr/bin/curl', ['-fL', '--retry', '3', '--connect-timeout', '15', '-sS', '-o', zip, asset.url], { tag: 'update', idleMs: 0 });
-  } catch (err) {
-    throw new Error(`Téléchargement impossible : ${String(err.message).slice(0, 160)}`);
-  } finally {
-    clearInterval(poll);
-  }
-  send({ stage: 'download', got: total || 1, total: total || 1 });
-  const hash = crypto.createHash('sha256');
-  await new Promise((res, rej) => fs.createReadStream(zip).on('data', (d) => hash.update(d)).on('end', res).on('error', rej));
-  // 2. verify: checksum from the version file, then the unpacked app's version
-  if (asset.sha256 && hash.digest('hex') !== asset.sha256) throw new Error('Fichier corrompu (checksum). Réessaie.');
-  send({ stage: 'unpack' });
-  await runProc('/usr/bin/ditto', ['-x', '-k', zip, path.join(tmp, 'x')], { tag: 'update' });
   const newApp = path.join(tmp, 'x', 'MARCUUS.app');
+  let light = false;
+  if (asset.patch) {
+    try {
+      light = await lightUpdate(bundle, asset.patch, tmp, newApp, send);
+    } catch (err) {
+      journal(`update: mise à jour légère impossible (${String(err.message).slice(0, 160)}), téléchargement complet`);
+      removeTree(path.join(tmp, 'x'));
+    }
+  }
+  if (!light) {
+    const zip = path.join(tmp, 'MARCUUS.zip');
+    try {
+      await fetchVerified(asset, zip, send);
+    } catch (err) {
+      throw new Error(`Téléchargement impossible : ${String(err.message).slice(0, 160)}`);
+    }
+    send({ stage: 'unpack' });
+    await updateTool('/usr/bin/ditto')(['-x', '-k', zip, path.join(tmp, 'x')]);
+  }
+  // 2. verify the unpacked app's version
   const plist = path.join(newApp, 'Contents', 'Info.plist');
   if (!fs.existsSync(plist)) throw new Error('Archive invalide.');
   const v = (await runProc('/usr/bin/plutil', ['-extract', 'CFBundleShortVersionString', 'raw', plist], { tag: 'update' })).trim();
@@ -598,11 +630,11 @@ if mv "$OLD" "$OLD.old"; then
   if mv "$NEW" "$OLD"; then rm -rf "$OLD.old"; else mv "$OLD.old" "$OLD"; fi
 fi
 xattr -dr com.apple.quarantine "$OLD" 2>/dev/null
-open "$OLD"
+${process.env.MARCUUS_USER_DATA ? `open --env MARCUUS_USER_DATA="${process.env.MARCUUS_USER_DATA}" "$OLD"` : 'open "$OLD"'}
 rm -rf "${tmp}"
 `);
   send({ stage: 'restart' });
-  journal(`update ${app.getVersion()} -> ${u.version}`);
+  journal(`update ${app.getVersion()} -> ${u.version}${light ? ' (légère)' : ''}`);
   spawn('/bin/sh', [script], { detached: true, stdio: 'ignore' }).unref();
   setTimeout(() => app.quit(), 400);
   return true;

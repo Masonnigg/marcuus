@@ -1,12 +1,15 @@
 // Publish a new MARCUUS version. Every installed copy is locked until it updates to it.
 //   1. bump "version" in package.json   2. npm run release -- "Ce qui change dans cette version"
-// Steps: tests → build DMGs + update zips → GitHub Release in the public releases repo →
+// Steps: tests → build DMGs + update zips + light update zips → GitHub Release in the public releases repo →
 // latest.json (last, so no Mac sees a version before its files exist) → tag the code repo.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, statSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+const { patchRoots, frozenDigest, fullDigest } = createRequire(import.meta.url)('../electron/update-files.cjs');
 
 const RELEASES_REPO = 'Masonnigg/marcuus-releases';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -32,12 +35,31 @@ for (const [arch, app] of Object.entries(builds)) {
   rmSync(join(root, zip), { force: true });
   run('/usr/bin/ditto', ['-c', '-k', '--keepParent', app, zip]); // keeps the app's signature and symlinks
   const buf = readFileSync(join(root, zip));
+  const bundle = join(root, app);
+  // light update: only the files that change between builds, next to the fingerprints that make it safe
+  const stage = join(root, `release/patch-${arch}`);
+  const patchZip = `release/MARCUUS-${version}-${arch}.patch.zip`;
+  rmSync(stage, { recursive: true, force: true });
+  rmSync(join(root, patchZip), { force: true });
+  for (const r of patchRoots(bundle)) {
+    mkdirSync(dirname(join(stage, r)), { recursive: true });
+    run('/usr/bin/ditto', [join(bundle, r), join(stage, r)]);
+  }
+  run('/usr/bin/ditto', ['-c', '-k', stage, patchZip]);
+  const patchBuf = readFileSync(join(root, patchZip));
   assets[arch] = {
     url: `https://github.com/${RELEASES_REPO}/releases/download/${tag}/MARCUUS-${version}-${arch}.zip`,
     sha256: createHash('sha256').update(buf).digest('hex'),
     size: statSync(join(root, zip)).size,
+    patch: {
+      url: `https://github.com/${RELEASES_REPO}/releases/download/${tag}/MARCUUS-${version}-${arch}.patch.zip`,
+      sha256: createHash('sha256').update(patchBuf).digest('hex'),
+      size: patchBuf.length,
+      base: await frozenDigest(bundle),
+      full: await fullDigest(bundle),
+    },
   };
-  files.push(zip);
+  files.push(zip, patchZip);
   if (existsSync(join(root, dmg))) files.push(dmg);
 }
 

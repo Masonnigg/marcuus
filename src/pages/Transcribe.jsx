@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AudioLines, Upload, Save, Copy, Clapperboard, X, Check, FolderOpen, Loader2, Download, AlertCircle, Cpu, Wand2, FishingHook } from 'lucide-react';
 import CaptionEditor from '../components/CaptionEditor.jsx';
+import { useBatchSelect, BatchButtons, Tick } from '../components/BatchSelect.jsx';
 import { PageHeader, useToast } from '../App.jsx';
 import { kit } from '../lib/kit.js';
 import { fmtTime, serializeSrt } from '../lib/srt.js';
-import { wordsFromWhisper, cuesFromWords } from '../lib/transcribe.js';
+import { wordsFromWhisper, cuesFromWords, srtTarget } from '../lib/transcribe.js';
 import { unitsFromCues, groupsToCues, enforceLimits, DEFAULT_EXPRESSIONS } from '../lib/segment.js';
 import { buildRefinePrompt, parseRefine } from '../lib/refine.js';
 import { loadSettings } from './Settings.jsx';
@@ -23,6 +24,8 @@ export default function Transcribe({ onSendToBroll, onSendToFixer, onSendToHook 
   const [jobs, setJobs] = useState([]);
   const [sel, setSel] = useState(null);
   const [over, setOver] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const batch = useBatchSelect(jobs, (j) => j.state === 'done');
   const inputRef = useRef();
   const running = useRef(false);
 
@@ -111,24 +114,48 @@ export default function Transcribe({ onSendToBroll, onSendToFixer, onSendToHook 
   }
   const srtPathFor = (job) => job.savedTo || job.path.replace(/\.[^./]+$/, '') + '.srt';
 
-  // never overwrite an existing .srt we didn't write (e.g. a TurboScribe one)
-  async function targetFor(job) {
-    if (job.savedTo) return job.savedTo;
-    const base = job.path.replace(/\.[^./]+$/, '');
-    return (await kit.exists(base + '.srt')) ? base + ' - MARCUUS.srt' : base + '.srt';
+  const exportedPaths = () => new Set(jobs.map((j) => j.savedTo).filter(Boolean));
+  const targetFor = (job, taken = exportedPaths()) => srtTarget(job, kit.exists, taken);
+
+  async function writeSrt(job, taken) {
+    const content = serializeSrt(cuesFor(job).map(({ start, end, text }) => ({ start, end, text })));
+    return kit.writeFile(await targetFor(job, taken), content);
   }
 
-  async function save(job, auto) {
-    const content = serializeSrt(cuesFor(job).map(({ start, end, text }) => ({ start, end, text })));
-    const target = await targetFor(job);
+  async function save(job) {
     try {
-      const p = await kit.writeFile(target, content);
-      if (!auto) notify('SRT exporté à côté de la vidéo', { ms: 4000, action: { label: 'Afficher', onClick: () => kit.reveal(p) } });
+      const p = await writeSrt(job);
+      notify('SRT exporté à côté de la vidéo', { ms: 4000, action: { label: 'Afficher', onClick: () => kit.reveal(p) } });
       return p;
     } catch (e) {
       notify(e.message, { tone: 'bad' });
       return null;
     }
+  }
+
+  // the picked files, one by one; those that fail stay selected to try again
+  async function exportPicked() {
+    setExporting(true);
+    const taken = exportedPaths();
+    const failed = [];
+    let last = null;
+    let done = 0;
+    for (const j of batch.picked) {
+      try {
+        last = await writeSrt(j, taken);
+        taken.add(last);
+        done++;
+        update(j.key, { savedTo: last, dirty: false });
+      } catch {
+        failed.push(j);
+      }
+    }
+    setExporting(false);
+    const msg = `${done} SRT exporté${done > 1 ? 's' : ''}${failed.length ? ` · ${failed.length} en échec` : ' à côté des vidéos'}`;
+    const shown = last;
+    notify(msg, { ms: 5000, tone: failed.length ? 'bad' : undefined, action: shown ? { label: 'Afficher', onClick: () => kit.reveal(shown) } : undefined });
+    if (failed.length) batch.keep(failed);
+    else batch.stop();
   }
 
   const job = jobs.find((j) => j.key === sel);
@@ -144,7 +171,8 @@ export default function Transcribe({ onSendToBroll, onSendToFixer, onSendToHook 
     >
       <PageHeader title="Transcrire" sub="Vidéo ou audio → sous-titres, en local sur ton Mac (Whisper). Les mots ne sont jamais coupés.">
         <input ref={inputRef} type="file" multiple hidden accept="video/*,audio/*,.mxf" onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }} />
-        {ready && <button className="btn" onClick={() => inputRef.current.click()}><Upload size={14} /> Ajouter des fichiers</button>}
+        {ready && !batch.on && <button className="btn" onClick={() => inputRef.current.click()}><Upload size={14} /> Ajouter des fichiers</button>}
+        {ready && <BatchButtons batch={batch} label="Exporter" busy={exporting} onRun={exportPicked} />}
       </PageHeader>
 
       {status && !ready ? (
@@ -171,7 +199,7 @@ export default function Transcribe({ onSendToBroll, onSendToFixer, onSendToHook 
           ) : (
             <div className="flex min-h-0 flex-1 gap-4">
               <aside className="flex w-[260px] shrink-0 flex-col gap-1.5 overflow-y-auto">
-                {jobs.map((j) => <JobItem key={j.key} job={j} active={j.key === sel} onClick={() => setSel(j.key)} onRemove={() => { setJobs((js) => js.filter((x) => x.key !== j.key)); if (sel === j.key) setSel(null); }} />)}
+                {jobs.map((j) => <JobItem key={j.key} job={j} active={j.key === sel} picking={batch.on} picked={batch.picked.includes(j)} onClick={() => (batch.on ? batch.toggle(j.key) : setSel(j.key))} onRemove={() => { setJobs((js) => js.filter((x) => x.key !== j.key)); if (sel === j.key) setSel(null); }} />)}
                 <button onClick={() => inputRef.current.click()} className="rounded-xl border border-dashed border-line p-3 text-[12px] text-faint transition-colors hover:border-line-2 hover:text-mute">+ Ajouter des fichiers</button>
               </aside>
               <section className="card flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -283,11 +311,13 @@ function Toggle({ on, onClick, children }) {
   );
 }
 
-function JobItem({ job, active, onClick, onRemove }) {
+function JobItem({ job, active, picking, picked, onClick, onRemove }) {
+  const locked = picking && job.state !== 'done'; // nothing to export yet
   return (
-    <button onClick={onClick} className={`group relative rounded-xl border p-3 text-left transition-colors ${active ? 'border-line-2 bg-panel-2' : 'border-transparent hover:bg-panel'}`}>
+    <button onClick={onClick} disabled={locked} className={`group relative rounded-xl border p-3 text-left transition-colors ${locked ? 'opacity-40' : ''} ${(picking ? picked : active) ? 'border-line-2 bg-panel-2' : 'border-transparent hover:bg-panel'}`}>
       <div className="flex items-start gap-2">
-        {job.state === 'done' ? <Check size={15} className="mt-px shrink-0 text-ok" />
+        {picking && !locked ? <Tick on={picked} />
+          : job.state === 'done' ? <Check size={15} className="mt-px shrink-0 text-ok" />
           : job.state === 'error' ? <AlertCircle size={15} className="mt-px shrink-0 text-bad" />
           : job.state === 'running' ? <Loader2 size={15} className="mt-px shrink-0 animate-spin text-accent" />
           : <AudioLines size={15} className="mt-px shrink-0 text-faint" />}
@@ -298,7 +328,7 @@ function JobItem({ job, active, onClick, onRemove }) {
           </div>
         </div>
       </div>
-      {job.state !== 'running' && (
+      {job.state !== 'running' && !picking && (
         <span role="button" onClick={(e) => { e.stopPropagation(); onRemove(); }} className="absolute top-2.5 right-2 rounded p-0.5 text-faint opacity-0 group-hover:opacity-100 hover:text-ink"><X size={13} /></span>
       )}
     </button>

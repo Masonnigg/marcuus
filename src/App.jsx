@@ -189,8 +189,8 @@ function UpdateGate({ update }) {
               <div className="h-full rounded-full bg-accent transition-all duration-300" style={{ width: `${state.stage === 'download' ? Math.max(3, pct) : 100}%` }} />
             </div>
             <div className="mt-2 text-[12px] text-mute">
-              {state.stage === 'download' ? `Téléchargement… ${pct}%${state.total ? ` · ${(state.got / 1e6).toFixed(0)} / ${(state.total / 1e6).toFixed(0)} Mo` : ''}`
-                : state.stage === 'unpack' ? 'Vérification…' : 'Redémarrage…'}
+              {state.stage === 'download' ? `Téléchargement… ${pct}%${state.total ? ` · ${(state.got / 1e6).toFixed(state.total < 1e7 ? 1 : 0)} / ${(state.total / 1e6).toFixed(state.total < 1e7 ? 1 : 0)} Mo` : ''}`
+                : state.stage === 'restart' ? 'Redémarrage…' : 'Vérification…'}
             </div>
           </div>
         ) : null}
