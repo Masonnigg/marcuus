@@ -19,6 +19,12 @@ contextBridge.exposeInMainWorld('kit', {
   stock: { search: call('stock:search'), download: call('stock:download') },
   openai: { ask: call('openai:ask'), cancel: call('openai:cancel'), status: call('openai:status') },
   probe: call('media:probe'),
+  fourfive: {
+    plan: call('fourfive:plan'),
+    convert: call('fourfive:convert'),
+    cancel: call('fourfive:cancel'),
+    onProgress: (fn) => { const h = (_e, p) => fn(p); ipcRenderer.on('fourfive:progress', h); return () => ipcRenderer.off('fourfive:progress', h); },
+  },
   chatgpt: {
     signIn: call('chatgpt:signIn'),
     cancelSignIn: call('chatgpt:cancelSignIn'),

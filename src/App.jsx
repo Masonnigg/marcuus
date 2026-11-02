@@ -1,10 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Palette, Captions, Clapperboard, Settings as Cog, Check, AudioLines, FishingHook } from 'lucide-react';
+import { Palette, Captions, Clapperboard, Settings as Cog, Check, AudioLines, FishingHook, Crop } from 'lucide-react';
 import Palettes from './pages/Palettes.jsx';
 import Transcribe from './pages/Transcribe.jsx';
 import SrtFixer from './pages/SrtFixer.jsx';
 import Broll from './pages/Broll.jsx';
 import Hook from './pages/Hook.jsx';
+import FourFive from './pages/FourFive.jsx';
 import Settings from './pages/Settings.jsx';
 import { kit } from './lib/kit.js';
 import avatar from './assets/avatar.png?inline';
@@ -17,6 +18,7 @@ const NAV = [
   { id: 'srt', label: 'SRT Fixer', icon: Captions },
   { id: 'broll', label: 'B-roll', icon: Clapperboard },
   { id: 'hook', label: 'Hook', icon: FishingHook },
+  { id: 'fourfive', label: '4x5', icon: Crop },
   { id: 'palettes', label: 'Palettes', icon: Palette },
 ];
 
@@ -89,14 +91,17 @@ function Main() {
 
         <main className="relative min-w-0 flex-1">
           <div className="drag absolute inset-x-0 top-0 h-[38px]" />
-          {/* Transcrire and Hook stay mounted so running jobs and edits survive tab switches */}
+          {/* Transcrire, Hook and 4x5 stay mounted so running jobs and edits survive tab switches */}
           <div className="h-full" hidden={page !== 'transcribe'}>
             <Transcribe onSendToBroll={sendToBroll} onSendToFixer={sendToFixer} onSendToHook={sendToHook} />
           </div>
           <div className="h-full" hidden={page !== 'hook'}>
             <Hook active={page === 'hook'} input={hookInput} goSettings={() => go('settings')} goTranscribe={() => go('transcribe')} />
           </div>
-          <div className="h-full" key={page} hidden={page === 'transcribe' || page === 'hook'}>
+          <div className="h-full" hidden={page !== 'fourfive'}>
+            <FourFive />
+          </div>
+          <div className="h-full" key={page} hidden={page === 'transcribe' || page === 'hook' || page === 'fourfive'}>
             {page === 'palettes' && <Palettes />}
             {page === 'srt' && <SrtFixer onSendToBroll={sendToBroll} input={fixerInput} />}
             {page === 'broll' && <Broll input={brollInput} goSettings={() => go('settings')} />}

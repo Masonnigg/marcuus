@@ -7,6 +7,7 @@ Mac app for editing short-form videos (French captions):
 - **B-roll**: Claude suggests shots per moment, searches Pixabay/Pexels videos; Envato / Pexels / Mixkit links.
 - **Hook**: an MP3 or a video → the sentence that should open the Reel, the passages to keep, 3 on-screen titles and a caption. The AI scores several candidate hooks and the app keeps the best one; a long recording gives several Reels, each with a different message. **Premiere** button: a vertical sequence already cut (hook, then body) to drag into Premiere.
   Analyses run on the user's own ChatGPT Plus/Pro plan with **Continue with ChatGPT** (OpenAI's Sign in with ChatGPT, no API key), or an OpenAI API key, or Claude Code if it is already set up on the Mac.
+- **4x5**: drop a folder (or videos) → 4:5 copies cropped in the middle (1080×1920 → 1080×1350), visually lossless and about half the size, in "<folder> 4x5" with the same subfolders. CPU (x264) or the Mac's hardware encoder.
 - **Palettes**: click-to-copy colour palettes, extract from an image.
 
 Electron + React (Vite) + Tailwind. UI in French.
@@ -16,7 +17,7 @@ Electron + React (Vite) + Tailwind. UI in French.
 ```bash
 npm install
 npm run start          # build + run
-npm test               # SRT fixer, caption splitting, hook, Premiere export, ChatGPT sign-in and update tests
+npm test               # SRT fixer, caption splitting, hook, Premiere export, ChatGPT sign-in, update and 4x5 tests
 ```
 
 ## Build installers

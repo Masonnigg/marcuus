@@ -434,7 +434,7 @@ const runProc = (bin, args, { onOutput, env, idleMs = 0, tag = path.basename(bin
 ipcMain.handle('whisper:cancel', () => { for (const p of activeProcs) p.kill('SIGTERM'); });
 
 // ffmpeg's banner for a file (size, fps, audio): `ffmpeg -i` with no output prints it and exits 1
-ipcMain.handle('media:probe', (_e, filePath) => new Promise((resolve, reject) => {
+const ffmpegBanner = (filePath) => new Promise((resolve, reject) => {
   const ffmpeg = findBin('ffmpeg');
   if (!ffmpeg) return reject(new Error('ffmpeg manquant. Dans le Terminal : brew install ffmpeg'));
   const p = spawn(ffmpeg, ['-hide_banner', '-nostdin', '-i', filePath]);
@@ -442,7 +442,59 @@ ipcMain.handle('media:probe', (_e, filePath) => new Promise((resolve, reject) =>
   p.stderr.on('data', (d) => { err += d; });
   p.on('error', reject);
   p.on('close', () => (/Duration:/.test(err) ? resolve(err) : reject(new Error(err.trim().split('\n').pop() || 'Fichier illisible.'))));
+});
+ipcMain.handle('media:probe', (_e, filePath) => ffmpegBanner(filePath));
+
+// ---- 4x5: vertical videos cropped to 4:5, folders rebuilt as "<folder> 4x5" ----
+const fourfive = require('./fourfive.cjs');
+ipcMain.handle('fourfive:plan', async (_e, paths) => {
+  const jobs = fourfive.planJobs(paths);
+  for (const j of jobs) {
+    j.size = fs.statSync(j.src).size;
+    try {
+      j.info = fourfive.parseBanner(await ffmpegBanner(j.src));
+      j.crop = fourfive.cropFor(j.info.width, j.info.height);
+    } catch {
+      j.error = 'Vidéo illisible.';
+    }
+  }
+  return jobs;
+});
+let fourfiveProc = null;
+let fourfiveStop = false;
+// written to "<name> 4x5.en-cours.mp4" first: an interrupted file never passes for a finished one
+ipcMain.handle('fourfive:convert', (e, job) => new Promise((resolve) => {
+  const ffmpeg = findBin('ffmpeg');
+  if (!ffmpeg) return resolve({ ok: false, error: 'ffmpeg manquant.' });
+  if (fs.existsSync(job.out)) return resolve({ ok: true, skipped: true, size: fs.statSync(job.out).size }); // never overwritten
+  try { fs.mkdirSync(path.dirname(job.out), { recursive: true }); } catch (err) { return resolve({ ok: false, error: `Dossier impossible à créer : ${err.message}` }); }
+  const tmp = fourfive.tmpFor(job.out);
+  const p = spawn(ffmpeg, fourfive.ffmpegArgs(job.src, tmp, job.info, job.crop, { gpu: !!job.gpu }));
+  fourfiveProc = p;
+  fourfiveStop = false;
+  let tail = '';
+  let err = '';
+  p.stdout.on('data', (d) => {
+    tail = (tail + d).slice(-400);
+    const m = [...tail.matchAll(/out_time_us=(\d+)/g)].pop();
+    if (m && job.info.duration && !e.sender.isDestroyed()) e.sender.send('fourfive:progress', { src: job.src, pct: Math.min(99, Math.round(m[1] / 10 / job.info.duration)) });
+  });
+  p.stderr.on('data', (d) => { err = (err + d).slice(-2000); });
+  p.on('error', (er) => resolve({ ok: false, error: er.message }));
+  p.on('close', (code, signal) => {
+    fourfiveProc = null;
+    if (code === 0 && fs.existsSync(tmp)) {
+      fs.renameSync(tmp, job.out);
+      journal(`4x5: ${path.basename(job.out)}`);
+      return resolve({ ok: true, size: fs.statSync(job.out).size });
+    }
+    fs.rmSync(tmp, { force: true });
+    // ffmpeg quits cleanly when told to stop: it's a cancel, not a failure
+    if (fourfiveStop || signal) return resolve({ ok: false, cancelled: true, error: 'Annulé.' });
+    resolve({ ok: false, error: err.trim().split('\n').pop() || `ffmpeg a échoué (${code})` });
+  });
 }));
+ipcMain.handle('fourfive:cancel', () => { fourfiveStop = true; fourfiveProc?.kill('SIGTERM'); });
 
 ipcMain.handle('whisper:status', () => ({
   supported: SUPPORTS_MLX,

@@ -63,6 +63,14 @@ for (const [arch, app] of Object.entries(builds)) {
   if (existsSync(join(root, dmg))) files.push(dmg);
 }
 
+// will Macs on the current version get the light update? (they need the same base: Electron, tools, icon…)
+let previous = null;
+try { previous = JSON.parse(Buffer.from(out('gh', ['api', `repos/${RELEASES_REPO}/contents/latest.json`, '-q', '.content']), 'base64').toString()); } catch {}
+for (const [arch, a] of Object.entries(assets)) {
+  const same = previous?.assets?.[arch]?.patch?.base === a.patch.base;
+  console.log(`${arch} : ${same ? `mise à jour légère depuis ${previous.version} (${(a.patch.size / 1e6).toFixed(1)} Mo)` : `téléchargement complet (${(a.size / 1e6).toFixed(0)} Mo) : la base a changé`}`);
+}
+
 run('gh', ['release', 'create', tag, '--repo', RELEASES_REPO, '--title', `MARCUUS ${version}`, '--notes', notes, ...files]);
 
 // latest.json goes last: installed apps only see the new version once its downloads exist

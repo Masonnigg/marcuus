@@ -34,6 +34,7 @@ const mock = {
     status: async () => ({ ok: false, error: 'Disponible uniquement dans l’app MARCUUS.' }),
   },
   probe: async () => { throw new Error('Disponible uniquement dans l’app MARCUUS.'); },
+  fourfive: { plan: async () => [], convert: async () => ({ ok: false, error: 'Disponible uniquement dans l’app MARCUUS.' }), cancel: async () => {}, onProgress: () => () => {} },
   chatgpt: {
     signIn: async () => ({ ok: false, error: 'Disponible uniquement dans l’app MARCUUS.' }),
     cancelSignIn: async () => {},
