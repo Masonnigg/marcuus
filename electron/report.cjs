@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 // The project's DSN. A DSN only lets someone send events to the project, which is why Sentry ships it in apps.
-const DSN = '';
+const DSN = 'https://82451541d979e245a865c98f062f582a@o4512379574878208.ingest.de.sentry.io/4512379603779664';
 
 const FILES = 'mp4|mov|m4v|mxf|mts|avi|mkv|mp3|wav|m4a|aiff?|srt|prproj|prtextstyle|pdf|docx?|rtf|odt|txt|md|json|png|jpe?g|epr';
 const APP_ROOT = path.resolve(__dirname, '..'); // …/app.asar once packaged, the code folder in development
