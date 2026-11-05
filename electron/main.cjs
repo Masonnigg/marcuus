@@ -621,12 +621,48 @@ const adsCacheKey = (filePath) => {
   const st = fs.statSync(filePath);
   return require('crypto').createHash('sha1').update(`${filePath}|${st.size}|${st.mtimeMs}|v2`).digest('hex').slice(0, 20);
 };
+// A fine level track (every 5 ms: loudness in dB and zero crossings) to find the gap between two words said in
+// one breath ("soixante‿et"), where the speech mask sees no pause and Whisper's word times are off.
+function adsEnvelope(ffmpeg, input) {
+  return new Promise((resolve, reject) => {
+    const p = spawn(ffmpeg, ['-nostdin', '-v', 'error', '-i', input, '-vn', '-ar', '16000', '-ac', '1', '-f', 's16le', '-']);
+    const N = 80; // 5 ms at 16 kHz
+    const db = [], zcr = [];
+    let rest = Buffer.alloc(0);
+    p.stdout.on('data', (chunk) => {
+      const buf = rest.length ? Buffer.concat([rest, chunk]) : chunk;
+      const frames = Math.floor(buf.length / (N * 2));
+      const s16 = new Int16Array(buf.buffer.slice(buf.byteOffset, buf.byteOffset + frames * N * 2));
+      for (let f = 0; f < frames; f++) {
+        let s = 0, z = 0;
+        for (let i = f * N; i < (f + 1) * N; i++) {
+          s += s16[i] * s16[i];
+          if (i > f * N && (s16[i] >= 0) !== (s16[i - 1] >= 0)) z++;
+        }
+        db.push(Math.min(255, Math.round(10 * Math.log10(s / N + 1))));
+        zcr.push(z);
+      }
+      rest = Buffer.from(buf.subarray(frames * N * 2));
+    });
+    p.on('error', reject);
+    p.on('close', (code) => (code === 0
+      ? resolve({ hop: 5, db: Buffer.from(db).toString('base64'), zcr: Buffer.from(zcr).toString('base64') })
+      : reject(new Error(`ffmpeg (niveau sonore) : code ${code}`))));
+  });
+}
 ipcMain.handle('ads:prepare', async (e, filePath) => {
   const ffmpeg = findBin('ffmpeg');
   if (!ffmpeg) throw new Error('ffmpeg manquant.');
   if (!fs.existsSync(enginePy()) || !modelReady()) throw new Error('Moteur pas encore installé (onglet Transcrire).');
   const cached = path.join(adsCacheDir(), `${adsCacheKey(filePath)}.json`);
-  if (fs.existsSync(cached)) return JSON.parse(fs.readFileSync(cached, 'utf8'));
+  if (fs.existsSync(cached)) {
+    const result = JSON.parse(fs.readFileSync(cached, 'utf8'));
+    if (!result.env) { // transcribed before the level track existed: add it, no new transcription
+      result.env = await adsEnvelope(ffmpeg, filePath);
+      fs.writeFileSync(cached, JSON.stringify(result));
+    }
+    return result;
+  }
   const send = (p) => { if (!e.sender.isDestroyed()) e.sender.send('ads:progress', { filePath, ...p }); };
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'marcuus-ads-'));
   try {
@@ -647,6 +683,7 @@ ipcMain.handle('ads:prepare', async (e, filePath) => {
       },
     });
     const result = JSON.parse(fs.readFileSync(out, 'utf8'));
+    result.env = await adsEnvelope(ffmpeg, wav);
     fs.mkdirSync(adsCacheDir(), { recursive: true });
     fs.writeFileSync(cached, JSON.stringify(result));
     send({ stage: 'done', pct: 100 });

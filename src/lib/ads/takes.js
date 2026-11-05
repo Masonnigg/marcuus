@@ -3,7 +3,7 @@
 //  - spoken lines (teleprompter reads, often several takes): Claude picks the clean take's phrases, and
 //    lists the other complete takes so the editor can switch in one click.
 // Claude only answers with phrase ids, so nothing it says can put words in the video that weren't said.
-import { prepWords, phrases, speechMask, piecesFor, cleanDisfluencies, quoteWords, noRepeats, sayWords, expand, FILLERS, CUT_GAP, BODY_GAP } from './cut.js';
+import { prepWords, phrases, speechMask, levelTrack, piecesFor, cleanDisfluencies, quoteWords, noRepeats, sayWords, expand, FILLERS, CUT_GAP, BODY_GAP } from './cut.js';
 import { partText } from './brief.js';
 
 const clock = (ms) => `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${((ms % 60000) / 1000).toFixed(1).padStart(4, '0')}`;
@@ -11,7 +11,7 @@ const clock = (ms) => `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${((ms
 /** Engine result for one file → a recording ready for matching. */
 export function recordingFrom(id, file, result) {
   const words = prepWords(result.words);
-  return { id, path: file.path, name: file.name, words, mask: speechMask(result.speech, result.duration), duration: result.duration, phrases: phrases(words, 300) };
+  return { id, path: file.path, name: file.name, words, mask: speechMask(result.speech, result.duration), env: levelTrack(result.env), duration: result.duration, phrases: phrases(words, 300) };
 }
 
 /** "1 min 35" / "40 sec" / "2:17" → ms, or null. */
@@ -174,7 +174,7 @@ export function piecesFromPhrases(ids, recordings, fine = false, trims = []) {
     const nr = noRepeats(rec.words, group);
     const cl = fine ? cleanDisfluencies(rec.words, nr.idx) : { keep: nr.idx, removed: [] };
     removed.push(...nr.removed, ...cl.removed);
-    pieces.push(...piecesFor(rec.words, cl.keep, rec.mask, rec.path, fine ? CUT_GAP : BODY_GAP));
+    pieces.push(...piecesFor(rec.words, cl.keep, rec.mask, rec.path, fine ? CUT_GAP : BODY_GAP, rec.env));
     text.push(sayWords(cl.keep.map((i) => rec.words[i].text)));
   }
   return { pieces, removed, text: text.join(' '), missed };
@@ -209,7 +209,7 @@ export function matchParts(script, recordings, takes, opts = {}) {
           if (cut.length >= 3 && !opts.loose) { res.flags.push(`Mot pour mot : j’ai retiré « ${sayWords(cut).slice(0, 80)} » au milieu de la citation`); res.confidence = 'check'; }
           const cl = fine ? cleanDisfluencies(hit.rec.words, hit.idx) : { keep: hit.idx, removed: [] };
           res.removed.push(...cl.removed);
-          res.pieces.push(...piecesFor(hit.rec.words, cl.keep, hit.rec.mask, hit.rec.path, fine ? CUT_GAP : BODY_GAP));
+          res.pieces.push(...piecesFor(hit.rec.words, cl.keep, hit.rec.mask, hit.rec.path, fine ? CUT_GAP : BODY_GAP, hit.rec.env));
           res.text.push(sayWords(cl.keep.map((i) => hit.rec.words[i].text)));
         } else if (!spokenDone) {
           spokenDone = true; // all spoken lines of a part come from one Claude pick

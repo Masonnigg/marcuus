@@ -56,16 +56,99 @@ export function speechMask(runs, durationMs) {
 }
 const on = (m, f) => f >= 0 && f < m.length && m[f] === 1;
 
+/** The engine's fine level track ({ hop: 5, db, zcr } in base64) → byte arrays, or null for old results. */
+export function levelTrack(env) {
+  if (!env?.db || env.hop !== HOP) return null;
+  const bytes = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  return { db: bytes(env.db), zcr: bytes(env.zcr) };
+}
+
+// ---------- joins inside connected speech ----------
+// Where a kept word and a cut one are said in one breath ("soixante‿et que…"), the mask has no pause and
+// Whisper's boundary can be 300 ms off. The real join is the quiet point between them on the 5 ms level track.
+export const HOP = 5;
+const letters = (w) => w.text.replace(/[^\p{L}\p{N}]/gu, '').length;
+const minLen = (w) => Math.max(60, 40 * letters(w)); // a kept word is at least this long: no join cuts deeper into it
+const NOISY = 30; // zero crossings per 5 ms above this = noise (a consonant's burst or hiss), under it = voice
+
+/** Quiet points between lo and hi ms: local minima at least 12 dB under the loudest frame 60 ms before AND after. */
+function dips(env, lo, hi) {
+  const out = [];
+  const db = env.db, a = Math.max(1, Math.floor(lo / HOP)), b = Math.min(db.length - 2, Math.ceil(hi / HOP));
+  for (let f = a; f <= b; f++) {
+    if (db[f] > db[f + 1] || db[f] >= db[f - 1]) continue; // a minimum (the first frame of a flat one)
+    let L = 0, R = 0;
+    for (let k = 1; k <= 12; k++) { L = Math.max(L, db[f - k] ?? 0); R = Math.max(R, db[f + k] ?? 0); }
+    if (L - db[f] >= 12 && R - db[f] >= 12) out.push(f);
+  }
+  return out;
+}
+const nearest = (frames, ms) => frames.reduce((a, b) => (Math.abs(b * HOP - ms) < Math.abs(a * HOP - ms) ? b : a));
+
+/** Start of a kept word glued to the cut word before it → ms, or null when the track shows no join. */
+export function joinStart(env, w) {
+  const near = dips(env, w.s - 150, w.e - minLen(w));
+  if (!near.length) return null;
+  let f = nearest(near, w.s);
+  const peak = Math.max(...env.db.subarray(f + 1, f + 13));
+  while (f < env.db.length - 1 && env.db[f] < peak - 12) f++;
+  // a word starting with a vowel takes the last consonant of the word before ("soixan|t‿et"): its burst is noise
+  // right after the gap, and it belongs to the cut word
+  if (/^[aeiouyh]/.test(norm(w.text))) for (let k = 0; k < 12 && env.zcr[f] >= NOISY; k++) f++;
+  return f * HOP;
+}
+/** End of a kept word glued to the cut word after it → ms (the quietest point between them), or null. */
+export function joinEnd(env, w) {
+  const near = dips(env, w.s + minLen(w), w.e + 150);
+  return near.length ? nearest(near, w.e) * HOP : null;
+}
+const gluedBefore = (m, w, prevEnd) => prevEnd > w.s - 100 && on(m, Math.round(Math.max(prevEnd, w.s - 100) / 10)) && on(m, Math.round(Math.max(prevEnd, w.s - 100) / 10) - 1);
+const gluedAfter = (m, w, nextStart) => nextStart < w.e + 100 && on(m, Math.round(nextStart / 10)) && on(m, Math.round(nextStart / 10) - 1);
+
 function onset(m, w, prevEnd) {
   const a = Math.round(Math.max(prevEnd, w.s - 100) / 10);
   if (on(m, a) && on(m, a - 1) && prevEnd > w.s - 100) return w.s; // glued to the previous word
   for (let j = a; j <= Math.floor(w.e / 10); j++) if (on(m, j)) return j * 10;
   return w.s;
 }
+/** Whisper often ends a sentence's last word early (a year above all: its "1962" ends before "deux" is said, its
+ *  "1991" before "onze", after a 60 ms gap). When the voice runs on, through gaps under 150 ms, and nothing else
+ *  is said before it stops, the word ends with the voice → frame, or null (no voice there, or it runs too far). */
+function voiceEnd(m, w, nextStart) {
+  const limit = Math.min(nextStart, w.e + 700) / 10;
+  let f = Math.floor(w.e / 10), end = null;
+  if (!on(m, f)) return null;
+  for (;;) {
+    while (on(m, f)) f++;
+    if (f > limit) return end; // this run goes beyond what the word can account for
+    end = f;
+    let g = f;
+    while (g < f + 15 && !on(m, g)) g++;
+    if (g >= f + 15) return end; // a real pause: the voice has stopped
+    f = g;
+  }
+}
 function offset(m, w, nextStart) {
+  const v = voiceEnd(m, w, nextStart);
+  if (v != null) return v * 10;
   const b = Math.round(Math.min(nextStart, w.e + 100) / 10);
   for (let j = b; j >= Math.floor(w.s / 10); j--) if (on(m, j)) return (j + 1) * 10;
   return w.e;
+}
+
+/** Whisper sometimes writes one spoken number twice, the second time only its end ("1974." then "74..", said
+ *  once as "…soixante-quatorze"), and the sentence split falls between them: the tail goes with the number. */
+export function numberTails(words, idx) {
+  const keep = new Set(idx);
+  const digits = (t) => t.replace(/\D/g, '');
+  for (const i of idx) {
+    for (let j = i; words[j + 1] && !keep.has(j + 1); j++) {
+      const a = digits(words[j].text), b = digits(words[j + 1].text);
+      if (!(a && b && b.length < a.length && a.endsWith(b) && words[j + 1].s - words[j].e < 60)) break;
+      keep.add(j + 1);
+    }
+  }
+  return [...keep];
 }
 
 /**
@@ -74,8 +157,8 @@ function offset(m, w, nextStart) {
  * neighbouring word over them; its word ENDS are reliable, so a word sits at [end − expected length, end]),
  * then every silence ≥ gap is removed (CUT_GAP for the editor's fine-cut style, BODY_GAP to keep takes whole).
  */
-export function piecesFor(words, idx, mask, media, gap = CUT_GAP) {
-  idx = [...new Set(idx)].sort((a, b) => a - b);
+export function piecesFor(words, idx, mask, media, gap = CUT_GAP, env = null) {
+  idx = [...new Set(numberTails(words, idx))].sort((a, b) => a - b);
   if (!idx.length) return [];
   const runsOfIdx = [];
   let cur = [idx[0]];
@@ -88,7 +171,10 @@ export function piecesFor(words, idx, mask, media, gap = CUT_GAP) {
     const f = words[r[0]], l = words[r[r.length - 1]];
     const prevEnd = r[0] > 0 ? words[r[0] - 1].e : 0;
     const nextStart = r[r.length - 1] + 1 < words.length ? words[r[r.length - 1] + 1].s : l.e + 1000;
-    const A = Math.floor(onset(mask, f, prevEnd) / 10), B = Math.round(offset(mask, l, nextStart) / 10);
+    // inside connected speech, the level track gives the exact join (no air added there: it would be the other word)
+    const jA = env && r[0] > 0 && gluedBefore(mask, f, prevEnd) ? joinStart(env, f) : null;
+    const jB = env && r[r.length - 1] + 1 < words.length && gluedAfter(mask, l, nextStart) ? joinEnd(env, l) : null;
+    const A = Math.floor((jA ?? onset(mask, f, prevEnd)) / 10), B = Math.round((jB ?? offset(mask, l, nextStart)) / 10);
     let raw = [];
     for (let j = A; j < B;) {
       if (on(mask, j)) {
@@ -98,10 +184,12 @@ export function piecesFor(words, idx, mask, media, gap = CUT_GAP) {
         j = k;
       } else j++;
     }
+    const l0 = r[r.length - 1];
     const occ = r.map((i) => {
       const w = words[i];
       const exp = 80 + 55 * w.text.replace(/[^\p{L}\p{N}]/gu, '').length;
-      return [Math.max(w.s, w.e - exp) - 50, w.e + 50];
+      // the last word reaches the voice's end when offset() found Whisper ended it early
+      return [Math.max(w.s, w.e - exp) - 50, i === l0 ? Math.max(w.e + 50, B * 10) : w.e + 50];
     });
     raw = raw.filter(([a, b]) => b - a > 100 || occ.some(([x, y]) => a * 10 < y && b * 10 > x));
     // a silence inside one word is a stop consonant ("cinq", "parce"), not a pause: never cut there
@@ -112,7 +200,11 @@ export function piecesFor(words, idx, mask, media, gap = CUT_GAP) {
       if (prev && (a - prev[1] < gap / 10 || inWord(prev[1], a))) prev[1] = b; else isl.push([a, b]);
     }
     if (!isl.length) isl.push([A, B]);
-    for (const [a, b] of isl) out.push({ media, in: Math.max(0, a * 10 - LEAD), out: b * 10 + TAIL });
+    isl.forEach(([a, b], i) => out.push({
+      media,
+      in: Math.max(0, a * 10 - (i === 0 && jA != null ? 0 : LEAD)),
+      out: b * 10 + (i === isl.length - 1 && jB != null ? 0 : TAIL),
+    }));
   }
   return out;
 }

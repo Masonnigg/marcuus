@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import pubsLib from '../premiere/lib/pubs.cjs';
 import panelCaptions from '../premiere/lib/captions.cjs';
 import { trimPhrase } from '../src/lib/ads/takes.js';
-import { expand, prepWords, phrases, speechMask, piecesFor, cleanDisfluencies, quoteWords, noRepeats, BODY_GAP, sayWords } from '../src/lib/ads/cut.js';
+import { expand, prepWords, phrases, speechMask, levelTrack, piecesFor, cleanDisfluencies, quoteWords, noRepeats, BODY_GAP, sayWords } from '../src/lib/ads/cut.js';
 
 let n = 0;
 const test = (name, fn) => { fn(); n++; console.log('✓', name); };
@@ -97,6 +97,49 @@ test('pieces: sound no word accounts for (a stammer) is cut', () => {
   const runs = [...speechOf(raw), [raw[0].end + 300, raw[0].end + 600]]; // the stammer itself
   const p = piecesFor(w, [0, 1, 2, 3], speechMask(runs, 6000), 'clip');
   assert.ok(!p.some((x) => x.in <= raw[0].end + 450 && x.out >= raw[0].end + 450), JSON.stringify(p));
+});
+
+// a 5 ms level track like the engine's: [fromMs, toMs, dB, zero crossings] segments over a quiet floor
+function track(ms, segs) {
+  const db = new Uint8Array(ms / 5).fill(12), zcr = new Uint8Array(ms / 5).fill(4);
+  for (const [a, b, d, z] of segs) { db.fill(d, a / 5, b / 5); zcr.fill(z, a / 5, b / 5); }
+  return levelTrack({ hop: 5, db: Buffer.from(db).toString('base64'), zcr: Buffer.from(zcr).toString('base64') });
+}
+// "…sept‿et demi" said in one breath: the vowel of "sept", its t (closure, then burst), a weak "et", "demi".
+// Whisper puts the sept/et boundary 220 ms early, the speech mask sees no pause.
+const breath = [[2000, 2250, 65, 5], [2250, 2280, 25, 6], [2280, 2320, 55, 45], [2320, 2400, 52, 12], [2440, 2800, 66, 5]];
+const breathMask = speechMask([[1900, 2400], [2440, 2800]], 4000);
+
+test('join in one breath: the kept word starts at the real gap, not where Whisper put it', () => {
+  const w = prepWords([{ text: 'sept', start: 1900, end: 2100 }, { text: 'et', start: 2100, end: 2450 }, { text: 'demi', start: 2450, end: 2800 }]);
+  const p = piecesFor(w, [1, 2], breathMask, 'clip', BODY_GAP, track(4000, breath));
+  assert.equal(p[0].in, 2320, JSON.stringify(p)); // after the t: "et" starts with a vowel, the t belongs to "sept"
+  assert.equal(piecesFor(w, [1, 2], breathMask, 'clip', BODY_GAP)[0].in, 2080); // no level track: as before
+});
+
+test('join in one breath: a word starting with a consonant keeps its burst', () => {
+  const w = prepWords([{ text: 'sept', start: 1900, end: 2100 }, { text: 'trop', start: 2100, end: 2450 }, { text: 'demi', start: 2450, end: 2800 }]);
+  assert.equal(piecesFor(w, [1, 2], breathMask, 'clip', BODY_GAP, track(4000, breath))[0].in, 2280);
+});
+
+test('the last word ends with the voice when Whisper ends it early (a year\'s last syllable after a short gap)', () => {
+  const raw = say('on part en douze', { start: 1000 });
+  raw.push({ text: 'ensuite', start: 4000, end: 4400, p: 1 }); // the next sentence, after a real pause
+  const w = prepWords(raw);
+  const last = raw[3].end; // Whisper's end; the voice goes on: 60 ms gap, then 250 ms more
+  const mask = speechMask([...speechOf(raw.slice(0, 3)), [raw[3].start, last + 100], [last + 160, last + 410], [4000, 4400]], 5000);
+  const p = piecesFor(w, [0, 1, 2, 3], mask, 'clip', BODY_GAP);
+  assert.ok(p.at(-1).out >= last + 410, JSON.stringify(p));
+  assert.ok(p.at(-1).out < 4000);
+});
+
+test('a number Whisper wrote twice ("1974." then "74..") is kept whole', () => {
+  const raw = say('on part en 1974. 74..', { start: 1000 });
+  raw[4].start = raw[3].end; // the tail follows with no gap
+  const w = prepWords(raw);
+  assert.deepEqual(phrases(w).map((p) => p.length), [4, 1]); // the split falls inside the number
+  const p = piecesFor(w, phrases(w)[0], speechMask([[1000, raw[4].end]], 4000), 'clip', BODY_GAP);
+  assert.ok(p.at(-1).out >= raw[4].end, JSON.stringify(p));
 });
 
 test('no sentence twice: a false start is trimmed, a full retake dropped', () => {
