@@ -215,9 +215,10 @@ function pubs_addCaptions(index, file) {
 }
 
 // The editor's caption style (.prtextstyle) into the project, once: it then shows in Premiere's Track Style list.
-function pubs_importStyle(file) {
+// styleName = the name written inside the file: Premiere gives it to the imported style (not the file's name)
+function pubs_importStyle(file, styleName) {
   try {
-    var name = decodeURI(new File(file).name).replace(/\.prtextstyle$/i, '');
+    var name = styleName || decodeURI(new File(file).name).replace(/\.prtextstyle$/i, '');
     var found = null;
     pubsWalk(app.project.rootItem, function (item) { if (!found && item.name === name && item.type !== ProjectItemType.BIN) found = item; });
     if (found) return pubsJson({ ok: true, name: name, existed: true });
@@ -504,7 +505,8 @@ function pubs_exportAs(index, format, out, preset) {
     var s = pubsJob.sequences[index];
     var seq = format === '4x5' ? (pubsFindBin(pubsBin4x5(s.bin)) ? pubsFindSequence(s.name + ' 4x5', pubsFindBin(pubsBin4x5(s.bin))) : null) : pubsJobSequence(s);
     if (!seq) return pubsFail('Séquence introuvable : ' + s.name + (format === '4x5' ? ' 4x5' : ''));
-    var id = app.encoder.encodeSequence(seq, new File(out).fsName, new File(preset).fsName, app.encoder.ENCODE_ENTIRE, 1);
+    // last argument 0: the file stays in Media Encoder's queue once rendered, so the editor sees what was exported
+    var id = app.encoder.encodeSequence(seq, new File(out).fsName, new File(preset).fsName, app.encoder.ENCODE_ENTIRE, 0);
     if (!id || id === '0') return pubsFail('Media Encoder a refusé ' + seq.name);
     return pubsJson({ ok: true, name: seq.name });
   } catch (e) { return pubsFail(e); }
@@ -514,9 +516,17 @@ function pubs_export(index, out, preset) {
     var s = pubsJob.sequences[index];
     var seq = pubsJobSequence(s);
     if (!seq) return pubsFail('Séquence introuvable : ' + s.name);
-    var id = app.encoder.encodeSequence(seq, new File(out).fsName, new File(preset).fsName, app.encoder.ENCODE_ENTIRE, 1);
+    var id = app.encoder.encodeSequence(seq, new File(out).fsName, new File(preset).fsName, app.encoder.ENCODE_ENTIRE, 0);
     if (!id || id === '0') return pubsFail('Media Encoder a refusé ' + s.name);
     return pubsJson({ ok: true, name: s.name });
+  } catch (e) { return pubsFail(e); }
+}
+
+// Opens Media Encoder before anything is sent: a file sent while it is still starting can be lost.
+function pubs_launchEncoder() {
+  try {
+    app.encoder.launchEncoder();
+    return pubsJson({ ok: true });
   } catch (e) { return pubsFail(e); }
 }
 

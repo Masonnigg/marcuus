@@ -1,7 +1,8 @@
 # MARCUUS
 
-Mac app for editing short-form videos (French captions). It shows as **RYACHA** (menus, Dock, window); the bundle and
-the data folder keep their old names (`MARCUUS.app`, `~/Library/Application Support/Edit Kit`) so updates and settings carry over.
+Mac app for editing short-form videos (French captions). It shows as **RYACHA** in its window and menus. The bundle keeps
+the name MARCUUS (`MARCUUS.app`, `CFBundleName`): Electron finds its helper apps by that name, and updates replace the
+bundle in place. The data folder keeps its first name too (`~/Library/Application Support/Edit Kit`).
 
 - **Transcrire**: video/audio → captions, on-device (Whisper large-v3-turbo on Apple MLX). Caption editor with per-caption playback, doubtful-word review, find & replace, "Affiner avec Claude".
 - **SRT Fixer**: rejoins words split by auto-captioners (TurboScribe…) and re-splits captions by grammar (1–2 words per line).

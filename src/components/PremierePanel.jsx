@@ -3,13 +3,19 @@ import { useEffect, useState } from 'react';
 import { Check, Loader2, Download } from 'lucide-react';
 import { kit } from '../lib/kit.js';
 
+// the Pubs tab and Réglages both show it (both stay mounted): an install from one updates the other
+const shown = new Set();
 export function usePanelStatus() {
   const [st, setSt] = useState(null);
-  useEffect(() => { kit.premiere.status().then(setSt).catch(() => setSt(null)); }, []);
+  useEffect(() => {
+    shown.add(setSt);
+    kit.premiere.status().then(setSt).catch(() => setSt(null));
+    return () => shown.delete(setSt);
+  }, []);
   const [busy, setBusy] = useState(false);
   const install = async () => {
     setBusy(true);
-    try { setSt(await kit.premiere.install()); } finally { setBusy(false); }
+    try { const r = await kit.premiere.install(); shown.forEach((set) => set(r)); } finally { setBusy(false); }
   };
   return { st, busy, install };
 }

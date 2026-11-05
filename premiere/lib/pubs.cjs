@@ -171,6 +171,40 @@ function textStart(b) {
 /** The font PostScript names written in a style or caption blob ("Montserrat-Bold"). */
 const fontsIn = (b) => (b.toString('latin1').match(/[A-Z][A-Za-z0-9]+-[A-Za-z0-9]+/g) || []);
 /** The .prtextstyle file → { uid, data (base64), font }. */
+/**
+ * Media Encoder's AMEEncodingLog.txt (UTF-16 or UTF-8) → Map(output path → { status, failed }) for every file it
+ * finished, ok or not. A record is " - Output File: <path>" and detail lines, then a dated status line
+ * ("… : File Successfully Encoded" / "… : Encoding Failed"): the status may be in the app's language, so a
+ * failure is only what reads like one, and the caller also checks the file on disk.
+ */
+function decodeLog(buf) {
+  const utf16 = (buf[0] === 0xff && buf[1] === 0xfe) || (buf.length > 3 && buf[1] === 0 && buf[3] === 0);
+  return utf16 ? Buffer.from(buf).toString('utf16le').replace(/^\ufeff/, '') : Buffer.from(buf).toString('utf8');
+}
+function ameRecords(text) {
+  const done = new Map();
+  let out = null;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    const m = line.match(/^- [^:]+: (\/.+)$/);
+    if (m && /output|sortie|ausgabe|salida|uscita/i.test(line.split(':')[0])) { out = m[1]; continue; }
+    if (out && /^\d/.test(line) && line.includes(' : ')) {
+      const status = line.slice(line.indexOf(' : ') + 3);
+      done.set(out, { status, failed: /fail|échec|échou|erreur|error|fehler|fallit|interrompu|interrupted|stopp/i.test(status) });
+      out = null;
+    }
+  }
+  return done;
+}
+
+/** The style's own name, written inside the .prtextstyle: Premiere names the imported style with it, not with the
+ *  file's name ("Studio final.prtextstyle" can hold a style called "Studio"). */
+function styleName(styleXml) {
+  const own = (styleXml.match(/<StyleProjectItem ObjectUID="[^"]+"[^>]*>([\s\S]*?)<\/StyleProjectItem>/) || [])[1] || '';
+  const name = (own.match(/<Name>([^<]*)<\/Name>/) || [])[1];
+  return name === undefined ? null : unescapeXml(name);
+}
+
 function readStyleFile(styleXml) {
   const uid = (styleXml.match(/<StyleProjectItem ObjectUID="([^"]+)"/) || [])[1];
   const data = ((styleXml.match(/<StartKeyframeValue Encoding="base64"[^>]*>([^<]+)</) || [])[1] || '').trim();
@@ -316,4 +350,4 @@ function styleCaptionTracks(xml, styleXml, names, learned) {
   return { xml: out, tracks: tracks.length, captions };
 }
 
-module.exports = { LAYER, STRENGTH, layerName, resizeTemplate, zoomsFor, frameFilter, cutsAndLayer, exportPlan, styleCaptionTracks, learnStyle, styleFromFile, styleFromProject, readStyleFile, textStart };
+module.exports = { LAYER, STRENGTH, layerName, resizeTemplate, zoomsFor, frameFilter, cutsAndLayer, exportPlan, styleCaptionTracks, learnStyle, styleFromFile, styleName, decodeLog, ameRecords, styleFromProject, readStyleFile, textStart };

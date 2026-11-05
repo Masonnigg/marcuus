@@ -341,6 +341,25 @@ test('panel caption style straight from the file: the sample text link is pointe
   assert.equal(pubsLib.styleFromFile(style.replace(b.toString('base64'), Buffer.alloc(56).toString('base64'))), null); // no sample: no guess
 });
 
+test('panel caption style: Premiere names an imported style with the name written inside the file', () => {
+  const file = '<Project/><StyleProjectItem ObjectUID="aaaa-1" ClassID="x" Version="1"><ProjectItem Version="1"><Name>Studio &amp; Co</Name></ProjectItem></StyleProjectItem>';
+  assert.equal(pubsLib.styleName(file), 'Studio & Co'); // the file itself could be called "Studio Co final.prtextstyle"
+  assert.equal(pubsLib.styleName('<Project/>'), null);
+});
+
+test('Media Encoder log: what it finished, ok or not, read from its UTF-16 log', () => {
+  const log = [
+    '01/02/2030 10:00:00 AM : Queue Started', '',
+    ' - Source File: /tmp/a.prproj', ' - Output File: /L/S1/9x16/S1 - H1.mp4', ' - Preset Used: Match Source', '01/02/2030 10:00:20 AM : File Successfully Encoded', '',
+    ' - Source File: /tmp/a.prproj', ' - Output File: /L/S1/4x5/S1 - H1 4x5.mp4', '01/02/2030 10:00:30 AM : Encoding Failed', 'The Operation was interrupted by user', '',
+    ' - Output File: /L/S1/9x16/S1 - H2.mp4', ' - Preset Used: Match Source', // still rendering: no status yet
+  ].join('\r\n');
+  const r = pubsLib.ameRecords(pubsLib.decodeLog(Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(log, 'utf16le')])));
+  assert.deepEqual([...r.keys()], ['/L/S1/9x16/S1 - H1.mp4', '/L/S1/4x5/S1 - H1 4x5.mp4']);
+  assert.equal(r.get('/L/S1/9x16/S1 - H1.mp4').failed, false);
+  assert.equal(r.get('/L/S1/4x5/S1 - H1 4x5.mp4').failed, true);
+});
+
 test('caption text is found even when another number looks like a longer text', () => {
   // [size][style... a 0x18 that could pass for a 24-byte text ending at the blob's last byte...][5]["tu es"][\0\0\0]
   const b = Buffer.alloc(48);

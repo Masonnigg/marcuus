@@ -7,6 +7,7 @@ import { planAds, buildJob } from '../lib/ads/plan.js';
 import { recordingFrom, spokenParts, buildTakesRequest, matchParts } from '../lib/ads/takes.js';
 import { askAI, availableEngines, adsEngine, engineLabel } from '../lib/ads/ai.js';
 import { usePanelStatus, InstallButton } from '../components/PremierePanel.jsx';
+import { playAnalyseSound, SoundControl } from '../components/AnalyseSound.jsx';
 
 const fileUrl = (p) => 'file://' + p.split('/').map(encodeURIComponent).join('/');
 const cleanErr = (e) => String(e?.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
@@ -73,6 +74,7 @@ export default function Pubs({ active }) {
   async function analyse() {
     const script = scripts.find((s) => s.id === job.scriptId);
     const files = job.media.filter((m) => m.on);
+    playAnalyseSound();
     setPhase('running');
     try {
       const names = files.map((f) => f.name);
@@ -191,6 +193,7 @@ function Setup({ job, setJob, scripts, run, onBrief, onFolder, onAnalyse }) {
           {!job?.briefText ? 'Ajoute le brief du client.' : !job.scriptId ? 'Choisis le script dans le brief (clique sur S…).' : !on.length ? 'Choisis les rushes de ce script.' : 'Transcription des rushes en local, puis l’IA lit le script et choisit les prises.'}
         </span>
         <EnginePicker />
+        <SoundControl />
         <button className="btn btn-primary h-9 px-5" disabled={!ready} onClick={onAnalyse}><Megaphone size={14} /> Analyser</button>
       </div>
     </div>
@@ -287,6 +290,7 @@ function Progress({ run }) {
             </li>
           ))}
         </ol>
+        <div className="mt-6 flex justify-end"><SoundControl /></div>
       </div>
     </div>
   );

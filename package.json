@@ -32,7 +32,6 @@
     ],
     "mac": {
       "extendInfo": {
-        "CFBundleName": "RYACHA",
         "CFBundleDisplayName": "RYACHA"
       },
       "target": [

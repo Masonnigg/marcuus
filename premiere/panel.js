@@ -40,13 +40,18 @@
   const done = () => { try { return Object.assign({ captioned: {} }, JSON.parse(localStorage.getItem(doneKey()) || '{}')); } catch (e) { return { captioned: {} }; } };
   const markDone = (patch) => { const d = Object.assign(done(), patch); try { localStorage.setItem(doneKey(), JSON.stringify(d)); } catch (e) {} };
 
+  // The panel loads its own host.jsx each time it opens: Premiere reads the manifest's copy only when it starts, so
+  // after the app updated the panel (Premiere still open) the new panel would talk to the old host until a restart.
+  const hostReady = new Promise((resolve) => {
+    window.__adobe_cep__.evalScript(`$.evalFile(${JSON.stringify(path.join(HERE, 'jsx', 'host.jsx'))})`, resolve);
+  });
   function host(fn, ...args) {
     const call = `${fn}(${args.map((a) => JSON.stringify(a)).join(',')})`;
-    return new Promise((resolve, reject) => {
+    return hostReady.then(() => new Promise((resolve, reject) => {
       window.__adobe_cep__.evalScript(call, (result) => {
         try { resolve(JSON.parse(result)); } catch (e) { reject(new Error(`Premiere n'a pas pu exécuter ${fn} : ${result}`)); }
       });
-    });
+    }));
   }
   const plural = (n, word) => `${n} ${word}${n > 1 ? 's' : ''}`;
   // Progress reads like Premiere's render bar: one segment per sequence or part. progress() lights the item being
@@ -174,7 +179,7 @@
       { done: built === all, text: built === all ? 'Fait' : built ? `${built}/${all} séquences` : `${all} séquences` },
       { done: parts.length > 0 && captioned === parts.length, text: captioned ? `${captioned}/${parts.length} sous-titrées` : plural(parts.length, 'partie') },
       { done: !!d.zoomed, text: d.zoomed ? 'Fait' : '' },
-      { done: !!d.exported, text: d.exported ? `${d.exported} en file` : plural(files, 'fichier') },
+      { done: !!d.exported, text: d.rendered ? `${d.rendered} rendu${d.rendered > 1 ? 's' : ''}` : d.exported ? `${d.exported} en file` : plural(files, 'fichier') },
     ];
   }
 
@@ -461,7 +466,9 @@
     let name = choice.name;
     if (choice.file) {
       progress(0.95, 'Style : import dans le projet…');
-      const s = await host('pubs_importStyle', choice.file);
+      let own = null;
+      try { own = lib.styleName(fs.readFileSync(choice.file, 'utf8')); } catch (e) { log(`Style : ${choice.file} illisible`, 'warn'); return; }
+      const s = await host('pubs_importStyle', choice.file, own || '');
       if (s.error) { log(`Style : ${s.error}`, 'warn'); return; }
       name = s.name;
     }
@@ -471,8 +478,9 @@
     try {
       fs.copyFileSync(c.path, c.path.replace(/\.prproj$/i, ' (avant style).prproj'));
       const xml = zlib.gunzipSync(fs.readFileSync(c.path)).toString('utf8');
-      const styleXml = choice.file ? fs.readFileSync(choice.file, 'utf8') : lib.styleFromProject(xml, choice.name);
-      if (!styleXml) throw new Error(`le style « ${choice.name} » n’est plus dans le projet`);
+      // Premiere gives an imported style a new ID: the tracks are linked to the style as it is in the project
+      const styleXml = lib.styleFromProject(xml, name) || (choice.file ? fs.readFileSync(choice.file, 'utf8') : null);
+      if (!styleXml) throw new Error(`le style « ${name} » n’est pas dans le projet`);
       const { uid } = lib.readStyleFile(styleXml);
       // the look: from a caption Premiere styled with it (this project, or remembered), else straight from the style
       let learned = lib.learnStyle(xml, styleXml, names);
@@ -666,6 +674,68 @@
   });
 
   // ---------- 4 · export ----------
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const ameRunning = () => {
+    try { require('child_process').execFileSync('/usr/bin/pgrep', ['-f', 'Adobe Media Encoder [0-9]+\\.app/Contents/MacOS/']); return true; } catch (e) { return false; }
+  };
+  // Media Encoder's own log of what it rendered (one per version: the one it writes to is the newest)
+  const AME_DIR = path.join(os.homedir(), 'Documents', 'Adobe', 'Adobe Media Encoder');
+  const ameLogs = () => { try { return fs.readdirSync(AME_DIR).map((v) => path.join(AME_DIR, v, 'AMEEncodingLog.txt')).filter((f) => fs.existsSync(f)); } catch (e) { return []; } };
+  const sizeOf = (f) => { try { return fs.statSync(f).size; } catch (e) { return -1; } };
+  const samePath = (f) => { try { return path.join(fs.realpathSync(path.dirname(f)), path.basename(f)); } catch (e) { return f; } };
+
+  /**
+   * Follows what Media Encoder really renders, from its log and the files on disk: one bar segment per file. A file
+   * it never received (it happens to the first ones sent after Premiere starts) is sent once more when nothing has
+   * moved for 40 s; after that it is reported, never silently counted as done.
+   */
+  async function followEncodes(sent, preset, logFrom) {
+    const left = new Map(sent.map((s) => [samePath(s.p.out), s]));
+    const sizes = new Map(), tried = new Set();
+    let done = 0, bad = 0, idleSince = Date.now(), seen = '';
+    for (const s of sent) segs[s.seg].className = '';
+    cur = -1; // this follows each file's own segment: log() must not mark the "current" one
+    const finish = (s, ok, why) => {
+      left.delete(samePath(s.p.out));
+      segs[s.seg].className = ok ? 'ok' : 'bad';
+      if (ok) { done++; log(`✓ ${s.label} rendu`, 'ok'); } else { bad++; log(`✗ ${s.label} : ${why}`, 'err'); }
+    };
+    while (left.size) {
+      await sleep(2000);
+      let text = '';
+      for (const f of ameLogs()) {
+        const buf = (() => { try { return fs.readFileSync(f); } catch (e) { return Buffer.alloc(0); } })();
+        const from = buf.length >= (logFrom[f] || 0) ? (logFrom[f] || 0) : 0;
+        text += lib.decodeLog(buf.subarray(from - (from % 2)));
+      }
+      if (text !== seen) { seen = text; idleSince = Date.now(); }
+      const rec = new Map([...lib.ameRecords(text)].map(([k, v]) => [samePath(k), v]));
+      for (const [out, s] of [...left]) {
+        const size = sizeOf(out);
+        if (size !== sizes.get(out)) { sizes.set(out, size); if (size > 0) { idleSince = Date.now(); segs[s.seg].className = 'run'; } }
+        const r = rec.get(out);
+        if (r) finish(s, size > 0 && !r.failed, r.failed ? `Media Encoder : ${r.status}` : 'le fichier n’est pas là');
+      }
+      $('status').textContent = `Media Encoder : ${done}/${sent.length} rendu${done > 1 ? 's' : ''}${bad ? ` · ${bad} en erreur` : ''}…`;
+      if (!left.size) break;
+      if (!ameRunning()) { for (const s of [...left.values()]) finish(s, sizeOf(samePath(s.p.out)) > 0, 'Media Encoder s’est fermé avant de le rendre'); break; }
+      if (Date.now() - idleSince < 40000) continue;
+      // nothing has moved for 40 s
+      for (const s of [...left.values()]) {
+        const out = samePath(s.p.out);
+        if (sizeOf(out) > 0) { finish(s, true); continue; } // written, its log line not there yet
+        if (tried.has(out)) { finish(s, false, 'Media Encoder ne l’a pas reçu, même renvoyé'); continue; }
+        tried.add(out);
+        const r = await host('pubs_exportAs', s.p.index, s.p.format, s.p.out, preset);
+        log(r.error ? `✗ ${s.label} : ${r.error}` : `↻ ${s.label} : Media Encoder ne l’avait pas reçu, renvoyé`, r.error ? 'err' : 'skip');
+        if (r.error) finish(s, false, r.error);
+      }
+      if (left.size) await host('pubs_exportStart');
+      idleSince = Date.now();
+    }
+    return { done, bad };
+  }
+
   const exportAds = () => task(3, async () => {
     const root = rootFolder();
     const preset = $('preset').value;
@@ -679,6 +749,15 @@
     const plan = filePlan().filter((p) => !filesOff.has(p.out));
     let queued = 0, skipped = 0, failed = 0, made4x5 = 0;
     bars(plan.length);
+    // Media Encoder first: a file sent while it is still starting can be lost
+    if (!ameRunning()) {
+      progress(0, 'Ouverture de Media Encoder…');
+      await host('pubs_launchEncoder');
+      for (let i = 0; i < 120 && !ameRunning(); i++) await sleep(500);
+      await sleep(10000); // it takes files once it has finished starting
+    }
+    const logFrom = Object.fromEntries(ameLogs().map((f) => [f, sizeOf(f)]));
+    const sent = [];
     for (let i = 0; i < plan.length; i++) {
       const p = plan[i];
       const label = path.basename(p.out);
@@ -696,15 +775,19 @@
       const r = await host('pubs_exportAs', p.index, p.format, p.out, preset);
       if (r.error) { failed++; log(`✗ ${label} : ${r.error}`, 'err'); continue; }
       queued++;
+      sent.push({ p, seg: i, label });
       log(`→ ${path.relative(root, p.out)}`, 'ok');
     }
+    let rendered = null;
     if (queued && settings.startNow !== false) {
       const s = await host('pubs_exportStart');
       if (s.error) log(`Lance la file dans Media Encoder : ${s.error}`, 'warn');
+      else rendered = await followEncodes(sent, preset, logFrom);
     }
-    if (queued) markDone({ exported: queued });
-    const where = settings.startNow !== false ? 'Media Encoder rend la file' : 'en file dans Media Encoder : vérifie, puis lance-la';
-    return `${plural(queued, 'fichier')} ${where}${made4x5 ? ` · ${made4x5} séquence${made4x5 > 1 ? 's' : ''} 4x5 créée${made4x5 > 1 ? 's' : ''}` : ''}${skipped ? ` · ${skipped} passés` : ''}${failed ? ` · ${failed} en erreur` : ''}`;
+    if (queued) markDone({ exported: queued, rendered: rendered ? rendered.done : 0 });
+    const where = rendered ? `rendu${rendered.done > 1 ? 's' : ''} par Media Encoder${rendered.bad ? ` · ${rendered.bad} en erreur` : ''}`
+      : settings.startNow !== false ? 'envoyés à Media Encoder' : 'en file dans Media Encoder : vérifie, puis lance-la';
+    return `${plural(rendered ? rendered.done : queued, 'fichier')} ${where}${made4x5 ? ` · ${made4x5} séquence${made4x5 > 1 ? 's' : ''} 4x5 créée${made4x5 > 1 ? 's' : ''}` : ''}${skipped ? ` · ${skipped} passés` : ''}${failed ? ` · ${failed} en erreur` : ''}`;
   });
 
   // ---------- wiring ----------
