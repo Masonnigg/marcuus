@@ -1,11 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Palette, Captions, Clapperboard, Settings as Cog, Check, AudioLines, FishingHook, Crop } from 'lucide-react';
+import { Palette, Captions, Clapperboard, Settings as Cog, Check, AudioLines, FishingHook, Crop, Megaphone } from 'lucide-react';
 import Palettes from './pages/Palettes.jsx';
 import Transcribe from './pages/Transcribe.jsx';
 import SrtFixer from './pages/SrtFixer.jsx';
 import Broll from './pages/Broll.jsx';
 import Hook from './pages/Hook.jsx';
 import FourFive from './pages/FourFive.jsx';
+import Pubs from './pages/Pubs.jsx';
 import Settings from './pages/Settings.jsx';
 import { kit } from './lib/kit.js';
 import avatar from './assets/avatar.png?inline';
@@ -18,6 +19,7 @@ const NAV = [
   { id: 'srt', label: 'SRT Fixer', icon: Captions },
   { id: 'broll', label: 'B-roll', icon: Clapperboard },
   { id: 'hook', label: 'Hook', icon: FishingHook },
+  { id: 'pubs', label: 'Pubs', icon: Megaphone },
   { id: 'fourfive', label: '4x5', icon: Crop },
   { id: 'palettes', label: 'Palettes', icon: Palette },
 ];
@@ -75,7 +77,7 @@ function Main() {
           <div className="no-drag mb-5 flex items-center gap-2.5 px-2">
             <img src={avatar} alt="" className="size-8 rounded-lg object-cover ring-1 ring-white/10" />
             <div className="leading-tight">
-              <div className="text-[13px] font-bold tracking-[0.06em]">MARCUUS</div>
+              <div className="text-[13px] font-bold tracking-[0.06em]">RYACHA</div>
               <div className="text-[11px] text-faint">workflow de montage</div>
             </div>
           </div>
@@ -91,7 +93,7 @@ function Main() {
 
         <main className="relative min-w-0 flex-1">
           <div className="drag absolute inset-x-0 top-0 h-[38px]" />
-          {/* Transcrire, Hook and 4x5 stay mounted so running jobs and edits survive tab switches */}
+          {/* Transcrire, Hook, Pubs and 4x5 stay mounted so running jobs and edits survive tab switches */}
           <div className="h-full" hidden={page !== 'transcribe'}>
             <Transcribe onSendToBroll={sendToBroll} onSendToFixer={sendToFixer} onSendToHook={sendToHook} />
           </div>
@@ -101,7 +103,10 @@ function Main() {
           <div className="h-full" hidden={page !== 'fourfive'}>
             <FourFive />
           </div>
-          <div className="h-full" key={page} hidden={page === 'transcribe' || page === 'hook' || page === 'fourfive'}>
+          <div className="h-full" hidden={page !== 'pubs'}>
+            <Pubs active={page === 'pubs'} />
+          </div>
+          <div className="h-full" key={page} hidden={page === 'transcribe' || page === 'hook' || page === 'fourfive' || page === 'pubs'}>
             {page === 'palettes' && <Palettes />}
             {page === 'srt' && <SrtFixer onSendToBroll={sendToBroll} input={fixerInput} />}
             {page === 'broll' && <Broll input={brollInput} goSettings={() => go('settings')} />}
@@ -182,7 +187,7 @@ function UpdateGate({ update }) {
       <div className="no-drag rise w-full max-w-md text-center">
         <img src={avatar} alt="" className="mx-auto mb-5 size-16 rounded-2xl object-cover ring-1 ring-white/10" />
         <h1 className="text-[20px] font-semibold tracking-[-0.02em]">Mise à jour requise</h1>
-        <p className="mt-1.5 text-mute">MARCUUS {update.version} est disponible. Tu as la version {update.current}.<br />Mets à jour pour continuer, tes réglages et fichiers sont conservés.</p>
+        <p className="mt-1.5 text-mute">RYACHA {update.version} est disponible. Tu as la version {update.current}.<br />Mets à jour pour continuer, tes réglages et fichiers sont conservés.</p>
         {update.notes && (
           <div className="card mt-5 max-h-40 overflow-y-auto p-4 text-left text-[12.5px] whitespace-pre-line text-mute" data-selectable>{update.notes}</div>
         )}

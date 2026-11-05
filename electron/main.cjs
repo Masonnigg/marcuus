@@ -8,6 +8,7 @@ const DEV_URL = process.env.EDITKIT_DEV_URL;
 
 // Keep using the data folder from when the app was called "Edit Kit" (palettes, keys, settings).
 // MARCUUS_USER_DATA: a separate data folder for tests, so they never touch the real sessions.
+app.setName('RYACHA'); // the name people see (menus, Dock); the bundle stays MARCUUS.app so updates keep working
 app.setPath('userData', process.env.MARCUUS_USER_DATA || path.join(app.getPath('appData'), 'Edit Kit'));
 const dataDir = () => app.getPath('userData');
 const storePath = (key) => path.join(dataDir(), `${key.replace(/[^a-z0-9_-]/gi, '')}.json`);
@@ -29,7 +30,7 @@ function createWindow() {
     height: 860,
     minWidth: 980,
     minHeight: 640,
-    title: 'MARCUUS',
+    title: 'RYACHA',
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 18, y: 18 },
     backgroundColor: '#0b0b0d',
@@ -51,6 +52,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   createWindow();
+  refreshPanel(); // an app update brings the Premiere panel's new version along
   setInterval(async () => {
     const u = await checkForUpdate();
     if (u) BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('update:available', publicUpdate(u)));
@@ -126,7 +128,7 @@ ipcMain.handle('claude:ask', (_e, prompt, model, opts = {}) => new Promise((reso
   claudeProc = p;
   let out = '';
   let err = '';
-  const timer = setTimeout(() => p.kill('SIGTERM'), 4 * 60 * 1000);
+  const timer = setTimeout(() => p.kill('SIGTERM'), Math.min(opts.timeoutMs || 4 * 60 * 1000, 20 * 60 * 1000));
   p.stdout.on('data', (d) => { out += d; });
   p.stderr.on('data', (d) => { err += d; });
   p.on('error', (e) => { clearTimeout(timer); resolve({ ok: false, error: e.message }); });
@@ -275,12 +277,12 @@ function openaiError(status, err, model) {
 }
 
 let openaiAbort = null;
-ipcMain.handle('openai:ask', async (_e, { system, user, schema, name }) => {
+ipcMain.handle('openai:ask', async (_e, { system, user, schema, name, timeoutMs }) => {
   const { key, model } = openaiConf();
   if (!key) return { ok: false, code: 'nokey', error: 'Ajoute ta clé OpenAI dans Réglages.' };
   openaiAbort?.abort();
   const ctrl = (openaiAbort = new AbortController());
-  const timer = setTimeout(() => ctrl.abort('timeout'), 4 * 60_000);
+  const timer = setTimeout(() => ctrl.abort('timeout'), Math.min(timeoutMs || 4 * 60_000, 20 * 60_000));
   try {
     const r = await fetch(`${OPENAI_URL}/responses`, {
       method: 'POST',
@@ -352,7 +354,8 @@ let chatgptAbort = null;
 ipcMain.handle('chatgpt:ask', async (_e, req) => {
   chatgptAbort?.abort();
   const ctrl = (chatgptAbort = new AbortController());
-  const timer = setTimeout(() => ctrl.abort('timeout'), 4 * 60_000);
+  // 4 min by default; Pubs reads whole transcripts and asks for more (capped at 20 min)
+  const timer = setTimeout(() => ctrl.abort('timeout'), Math.min(req?.timeoutMs || 4 * 60_000, 20 * 60_000));
   try { return await chatgpt.ask(req, ctrl.signal); } finally {
     clearTimeout(timer);
     if (chatgptAbort === ctrl) chatgptAbort = null;
@@ -566,6 +569,120 @@ ipcMain.handle('whisper:transcribe', async (e, filePath, opts = {}) => {
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// ---- the Premiere panel (RYACHA) ships inside the app and is installed from it ----------------------------
+// It lives in app.asar.unpacked so light updates carry it. Installing copies it into Premiere's extensions
+// folder and turns on Adobe's flag for unsigned panels. A developer's symlink there is never replaced.
+const PANEL_ID = 'com.reda.marcuus.pubs';
+const panelSource = () => path.join(__dirname, '..', 'premiere').replace('app.asar', 'app.asar.unpacked');
+const panelDest = () => path.join(os.homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', PANEL_ID);
+const panelMark = () => path.join(panelDest(), '.ryacha-version');
+function panelStatus() {
+  const dest = panelDest();
+  const st = fs.lstatSync(dest, { throwIfNoEntry: false });
+  let version = null;
+  try { version = fs.readFileSync(panelMark(), 'utf8').trim(); } catch {}
+  return { installed: !!st && fs.existsSync(path.join(dest, 'CSXS', 'manifest.xml')), linked: !!st?.isSymbolicLink(), version, appVersion: app.getVersion(), available: fs.existsSync(path.join(panelSource(), 'CSXS', 'manifest.xml')) };
+}
+function installPanel() {
+  const src = panelSource(), dest = panelDest();
+  if (!fs.existsSync(path.join(src, 'CSXS', 'manifest.xml'))) return { ok: false, error: 'Panneau introuvable dans l’app.', ...panelStatus() };
+  if (fs.lstatSync(dest, { throwIfNoEntry: false })?.isSymbolicLink()) return { ok: true, dev: true, ...panelStatus() }; // developer link
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  const tmp = `${dest}.ryacha-new`;
+  fs.rmSync(tmp, { recursive: true, force: true });
+  // the shipped panel has no debug port and no dev scripts
+  fs.cpSync(src, tmp, { recursive: true, filter: (p) => !/^\/(dev|scripts)(\/|$)|^\/\.debug$/.test(p.slice(src.length)) });
+  fs.writeFileSync(path.join(tmp, '.ryacha-version'), app.getVersion());
+  fs.rmSync(dest, { recursive: true, force: true }); // only RYACHA's own panel folder
+  fs.renameSync(tmp, dest);
+  // Premiere only loads unsigned panels with this Adobe flag on (one per CEP version)
+  for (const v of [9, 10, 11, 12, 13]) require('node:child_process').spawnSync('/usr/bin/defaults', ['write', `com.adobe.CSXS.${v}`, 'PlayerDebugMode', '1']);
+  journal(`panneau Premiere installé (${app.getVersion()})`);
+  return { ok: true, ...panelStatus() };
+}
+// installed earlier and older than this app: bring it up to date (a link or no panel: nothing to do)
+function refreshPanel() {
+  try {
+    const st = panelStatus();
+    if (st.installed && !st.linked && st.available && st.version !== st.appVersion) installPanel();
+  } catch (err) { journal(`panneau Premiere : ${err.message}`); }
+}
+ipcMain.handle('premiere:status', () => panelStatus());
+ipcMain.handle('premiere:install', () => { try { return installPanel(); } catch (err) { return { ok: false, error: err.message, ...panelStatus() }; } });
+
+// ---- Pubs: transcripts you can cut ads from (engine/ads_prepare.py) ----------------------------
+// Double pass + gap filling + invented-text guard, about 2× a normal transcription. Results are cached
+// per file (path, size, date), so reopening a job or re-running the analysis costs nothing.
+const adsScript = () => path.join(__dirname, 'engine', 'ads_prepare.py').replace('app.asar', 'app.asar.unpacked');
+const adsCacheDir = () => path.join(dataDir(), 'ads-cache');
+const adsCacheKey = (filePath) => {
+  const st = fs.statSync(filePath);
+  return require('crypto').createHash('sha1').update(`${filePath}|${st.size}|${st.mtimeMs}|v2`).digest('hex').slice(0, 20);
+};
+ipcMain.handle('ads:prepare', async (e, filePath) => {
+  const ffmpeg = findBin('ffmpeg');
+  if (!ffmpeg) throw new Error('ffmpeg manquant.');
+  if (!fs.existsSync(enginePy()) || !modelReady()) throw new Error('Moteur pas encore installé (onglet Transcrire).');
+  const cached = path.join(adsCacheDir(), `${adsCacheKey(filePath)}.json`);
+  if (fs.existsSync(cached)) return JSON.parse(fs.readFileSync(cached, 'utf8'));
+  const send = (p) => { if (!e.sender.isDestroyed()) e.sender.send('ads:progress', { filePath, ...p }); };
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'marcuus-ads-'));
+  try {
+    send({ stage: 'audio', pct: 0 });
+    const wav = path.join(tmp, 'audio.wav');
+    await runProc(ffmpeg, ['-nostdin', '-y', '-i', filePath, '-vn', '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', wav], { tag: 'ffmpeg', idleMs: 2 * 60_000 });
+    send({ stage: 'transcribe', pct: 0 });
+    journal(`--- pubs: ${path.basename(filePath)}`);
+    const out = path.join(tmp, 'out.json');
+    await runProc(enginePy(), [adsScript(), wav, out], {
+      tag: 'ads',
+      idleMs: 3 * 60_000,
+      onOutput: (chunk) => {
+        const m = [...chunk.matchAll(/(\d+)%\|/g)].pop();
+        if (m) send({ stage: 'transcribe', pct: +m[1] });
+        const step = [...chunk.matchAll(/\[marcuus[^\]]*\] ([^\n]+)/g)].pop();
+        if (step) send({ stage: 'transcribe', note: step[1] });
+      },
+    });
+    const result = JSON.parse(fs.readFileSync(out, 'utf8'));
+    fs.mkdirSync(adsCacheDir(), { recursive: true });
+    fs.writeFileSync(cached, JSON.stringify(result));
+    send({ stage: 'done', pct: 100 });
+    return result;
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+// the brief: PDF bytes go to pdf.js in the page; Word/RTF/ODT through macOS's own textutil; text as is
+ipcMain.handle('ads:readBrief', async (_e, filePath) => {
+  if (/\.pdf$/i.test(filePath)) return { kind: 'pdf', data: new Uint8Array(fs.readFileSync(filePath)) };
+  if (/\.(docx?|rtf|odt|html?)$/i.test(filePath)) return { kind: 'text', text: await runProc('/usr/bin/textutil', ['-convert', 'txt', '-stdout', filePath], { tag: 'textutil' }) };
+  return { kind: 'text', text: fs.readFileSync(filePath, 'utf8') };
+});
+// the build job for the Premiere panel (premiere/): a fixed place, even for test builds with their own data folder
+ipcMain.handle('ads:writeJob', (_e, job) => {
+  const file = path.join(os.homedir(), 'Library', 'Application Support', 'Edit Kit', 'pubs', 'job.json');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(job, null, 1));
+  return file;
+});
+ipcMain.handle('ads:listMedia', (_e, folder) => {
+  // every video/audio file in the footage folder (subfolders too), skipping exports and Premiere's own folders
+  const exts = /\.(mov|mp4|m4v|mxf|mts|avi|mkv|mp3|wav|m4a|aif|aiff)$/i;
+  const skip = /^(Adobe Premiere Pro .*|.*\.PRV|node_modules|\..*)$/;
+  const out = [];
+  const walk = (dir, depth) => {
+    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (skip.test(ent.name)) continue;
+      const p = path.join(dir, ent.name);
+      if (ent.isDirectory()) { if (depth < 4) walk(p, depth + 1); }
+      else if (exts.test(ent.name)) out.push({ path: p, name: ent.name, size: fs.statSync(p).size });
+    }
+  };
+  walk(folder, 0);
+  return out;
 });
 
 // ---- updates: every published version is required ---------------------------------------

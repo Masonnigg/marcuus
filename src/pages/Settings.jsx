@@ -4,6 +4,7 @@ import { Check, ExternalLink, Eye, EyeOff, FolderOpen, RefreshCw, AlertCircle, L
 import { PageHeader, useToast } from '../App.jsx';
 import { kit } from '../lib/kit.js';
 import { DEFAULT_EXPRESSIONS } from '../lib/segment.js';
+import { PremierePanelSection } from '../components/PremierePanel.jsx';
 import { hookEngineOf, CHATGPT_USAGE_URL } from '../lib/hook.js';
 import chatgptLogo from '../assets/chatgpt-logo-white.svg?inline';
 
@@ -39,7 +40,7 @@ export default function Settings() {
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader title="Réglages" sub={`MARCUUS ${version} · tout est stocké en local sur ton Mac.`} />
+      <PageHeader title="Réglages" sub={`RYACHA ${version} · tout est stocké en local sur ton Mac.`} />
       <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-10">
         <div className="flex max-w-3xl flex-col gap-4">
           <section className="card rise p-5">
@@ -76,6 +77,8 @@ export default function Settings() {
             </div>
           </section>
           )}
+
+          <PremierePanelSection />
 
           <section className="card rise p-5" style={{ animationDelay: '20ms' }}>
             <h2 className="mb-1 text-[14px] font-semibold">Onglet Hook</h2>
@@ -261,7 +264,7 @@ function ChatGPTAccount({ s, save }) {
           ) : (
             <div className="flex items-center gap-2 rounded-lg bg-warn/10 px-3 py-2 text-[12px] text-warn">
               <AlertCircle size={13} className="shrink-0" />
-              <span className="flex-1">L’usage de ton forfait n’a pas été autorisé pour MARCUUS.</span>
+              <span className="flex-1">L’usage de ton forfait n’a pas été autorisé pour RYACHA.</span>
               <button className="btn h-7 px-2.5 text-[12px]" onClick={signIn}>Autoriser</button>
             </div>
           )}
@@ -281,7 +284,7 @@ function ChatGPTAccount({ s, save }) {
           <div className="card w-[380px] p-6 text-center">
             <img src={chatgptLogo} alt="" className="mx-auto mb-3 size-8" />
             <div className="text-[15px] font-semibold">You’re using your ChatGPT plan</div>
-            <p className="mt-2 text-mute">Les analyses de l’onglet Hook utilisent maintenant ton forfait ChatGPT, sans frais en plus de ton abonnement. Tu peux fixer une limite pour MARCUUS dans ChatGPT › Réglages › Usage.</p>
+            <p className="mt-2 text-mute">Les analyses de l’onglet Hook utilisent maintenant ton forfait ChatGPT, sans frais en plus de ton abonnement. Tu peux fixer une limite pour RYACHA dans ChatGPT › Réglages › Usage.</p>
             <div className="mt-5 flex justify-center gap-2">
               <button className="btn" onClick={() => kit.open(CHATGPT_USAGE_URL)}>Gérer l’usage <ExternalLink size={12} /></button>
               <button className="btn btn-primary" onClick={() => { setWelcome(false); kit.store.set('chatgptWelcomed', true); }}>Got it</button>

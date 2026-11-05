@@ -8,7 +8,8 @@ const base = (p) => p.split('/').pop();
 
 /**
  * 4x5: drop folders or videos → 4:5 copies cropped in the middle. A folder is rebuilt next to it as
- * "<folder> 4x5" with the same subfolders; files are converted one at a time, never overwritten.
+ * "<folder> 4x5" with the same subfolders (a deliverables tree's "9x16" folders get their "4x5" twin instead);
+ * files are converted one at a time, never overwritten.
  */
 export default function FourFive() {
   const notify = useToast();
@@ -72,7 +73,7 @@ export default function FourFive() {
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setOver(false); }}
       onDrop={(e) => { e.preventDefault(); setOver(false); add([...e.dataTransfer.files].map((f) => kit.pathFor(f)).filter(Boolean)); }}
     >
-      <PageHeader title="4x5" sub="Vidéos verticales → 4:5, recadrées au milieu, sans perte visible et environ deux fois plus légères. Un dossier est recréé à côté avec « 4x5 » dans le nom.">
+      <PageHeader title="4x5" sub="Vidéos verticales → 4:5, recadrées au milieu, sans perte visible et environ deux fois plus légères. Un dossier est recréé à côté avec « 4x5 » dans le nom ; un dossier de livrables remplit le « 4x5 » à côté de chaque « 9x16 ».">
         <input ref={inputRef} type="file" multiple hidden accept="video/*,.mxf,.mts" onChange={(e) => { add([...e.target.files].map((f) => kit.pathFor(f)).filter(Boolean)); e.target.value = ''; }} />
         {!run && <button className="btn" onClick={async () => { const p = await kit.pickFolder(); if (p) add([p]); }}><FolderOpen size={14} /> Ajouter un dossier</button>}
         {!run && <button className="btn" onClick={() => inputRef.current.click()}><Upload size={14} /> Ajouter des vidéos</button>}
@@ -117,12 +118,13 @@ export default function FourFive() {
             <div className="min-h-0 flex-1 overflow-y-auto p-2">
               {groups.map((g) => {
                 const list = jobs.filter((j) => (j.root ?? '') === g);
-                const outRoot = g ? `${g} 4x5` : null;
+                const paired = list.some((j) => j.paired); // deliverables: 9x16 → its 4x5 twin
+                const outRoot = g ? (paired ? '4x5' : `${g} 4x5`) : null;
                 return (
                   <div key={g || 'files'} className="mb-2">
                     <div className="flex items-center gap-2 px-2 py-1.5 text-[12px]">
                       <Folder size={13} className="shrink-0 text-faint" />
-                      <span className="truncate font-medium">{g ? `${base(g)} → ${base(outRoot)}` : 'Vidéos seules (copie à côté de chaque vidéo)'}</span>
+                      <span className="truncate font-medium">{g ? (paired ? `${base(g)} → dossiers 4x5 à côté des 9x16` : `${base(g)} → ${base(outRoot)}`) : 'Vidéos seules (copie à côté de chaque vidéo)'}</span>
                       {outRoot && list.some((j) => j.state === 'done' || j.state === 'skipped') && (
                         <button className="ml-auto shrink-0 text-[11.5px] text-accent hover:underline" onClick={() => kit.reveal(list.find((j) => j.state === 'done' || j.state === 'skipped').out)}>Afficher</button>
                       )}

@@ -74,6 +74,20 @@ check('dropping the output folder converts nothing', planJobs([join(dir, 'DAY 5 
 const single = planJobs([join(root, 'sub', 'C.mp4')]);
 check('a single video: copy next to it', single.length === 1 && single[0].out === join(root, 'sub', 'C 4x5.mp4') && single[0].root === null);
 
+// ---- a deliverables batch: every 9x16 tree fills its 4x5 twin, whatever folder is dropped
+const batch = join(dir, 'Batch 1');
+const at916 = (rel) => { const f = join(batch, 'S7', '9x16', rel); mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, 'x'); };
+at916('Variante 1/Corps 1/S7 - V1 - H1 - C1.mp4');
+at916('Variante 2/Corps 2/S7 - V2 - H3 - C2.mp4');
+mkdirSync(join(batch, 'S7', '4x5', 'Variante 1', 'Corps 1'), { recursive: true });
+writeFileSync(join(batch, 'S7', '4x5', 'Variante 1', 'Corps 1', 'S7 - V1 - H1 - C1 4x5.mp4'), 'done before');
+const want = ['S7/4x5/Variante 1/Corps 1/S7 - V1 - H1 - C1 4x5.mp4', 'S7/4x5/Variante 2/Corps 2/S7 - V2 - H3 - C2 4x5.mp4'];
+const rel = (js) => js.map((j) => j.out.slice(batch.length + 1)).sort();
+check('batch folder: 9x16 videos go to the 4x5 twin folders', eq(rel(planJobs([batch])), want), rel(planJobs([batch])).join(' | '));
+check('9x16 folder dropped: same places', eq(rel(planJobs([join(batch, 'S7', '9x16')])), want));
+check('a 9x16 video alone: its 4x5 twin too', planJobs([join(batch, 'S7', '9x16', 'Variante 2', 'Corps 2', 'S7 - V2 - H3 - C2.mp4')])[0].out === join(batch, want[1]));
+check('the existing 4x5 is done, the 4x5 folder is never walked', planJobs([batch]).filter((j) => j.done).length === 1 && planJobs([batch]).every((j) => j.paired && !/\/4x5\//.test(j.src)));
+
 // ---- real conversions
 const ffmpeg = join(dirname(fileURLToPath(import.meta.url)), '..', 'vendor', process.arch, 'bin', 'ffmpeg');
 if (existsSync(ffmpeg)) {

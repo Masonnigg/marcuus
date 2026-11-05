@@ -1,6 +1,7 @@
 // 4x5 tab: vertical videos → 4:5 (1080×1920 → 1080×1350), cropped in the middle, full width, never upscaled.
 // A dropped folder is rebuilt next to it as "<folder> 4x5" with the same subfolders; each video becomes
-// "<name> 4x5.mp4". x264 CRF 17 (SSIM 0.997 on a real Reel, about half the original size), audio copied as is.
+// "<name> 4x5.mp4". Deliverables trees are the exception: a video under a "9x16" folder goes to the same place
+// under "4x5" (S7/9x16/Variante 1/… → S7/4x5/Variante 1/…), so a whole batch folder can be dropped at once. x264 CRF 17 (SSIM 0.997 on a real Reel, about half the original size), audio copied as is.
 // "Rapide" uses the Mac's hardware encoder: twice as fast, same quality on most clips, sometimes ~15 % bigger.
 const fs = require('node:fs');
 const path = require('node:path');
@@ -10,6 +11,15 @@ const VIDEO_RE = /\.(mp4|mov|m4v|mkv|webm|avi|mxf|mts|m2ts)$/i;
 // Premiere's previews and auto-saves live next to the deliverables: never worth converting
 const SKIP_DIR_RE = /^(\.|Adobe Premiere Pro |__MACOSX$)/;
 const AUDIO_COPY = new Set(['aac', 'mp3', 'alac', 'ac3', 'eac3', 'opus']); // can stay as is in an .mp4
+
+const NINE = /^9x16$/i;
+const FOUR = /^4x5$/i;
+/** "…/S7/9x16/Variante 1" → "…/S7/4x5/Variante 1", or null outside a 9x16 tree. */
+function swap916(dir) {
+  const parts = dir.split(path.sep);
+  const i = parts.map((p) => NINE.test(p)).lastIndexOf(true);
+  return i < 0 ? null : [...parts.slice(0, i), '4x5', ...parts.slice(i + 1)].join(path.sep);
+}
 
 const isVideo = (name) => VIDEO_RE.test(name) && !name.startsWith('._');
 const stem = (name) => name.replace(/\.[^.]+$/, '');
@@ -31,15 +41,15 @@ function planJobs(paths) {
       const p = path.join(dir, name);
       const st = fs.statSync(p, { throwIfNoEntry: false });
       if (!st) continue;
-      if (st.isDirectory()) { if (!SKIP_DIR_RE.test(name) && !name.endsWith(LABEL)) walk(p, root, outRoot); continue; }
-      if (isVideo(name) && !stem(name).endsWith(LABEL)) add(p, path.join(outRoot, path.relative(root, dir)), path.relative(root, p), root);
+      if (st.isDirectory()) { if (!SKIP_DIR_RE.test(name) && !name.endsWith(LABEL) && !FOUR.test(name)) walk(p, root, outRoot); continue; }
+      if (isVideo(name) && !stem(name).endsWith(LABEL)) add(p, swap916(dir) || path.join(outRoot, path.relative(root, dir)), path.relative(root, p), root);
     }
   };
   for (const p of paths) {
     const st = fs.statSync(p, { throwIfNoEntry: false });
     if (!st) continue;
     if (st.isDirectory()) walk(p, p, `${p}${LABEL}`);
-    else if (isVideo(path.basename(p)) && !stem(path.basename(p)).endsWith(LABEL)) add(p, path.dirname(p), path.basename(p), null);
+    else if (isVideo(path.basename(p)) && !stem(path.basename(p)).endsWith(LABEL)) add(p, swap916(path.dirname(p)) || path.dirname(p), path.basename(p), null);
   }
   // clip.mp4 and clip.mov in the same folder must not both become "clip 4x5.mp4"
   const count = new Map();
@@ -48,7 +58,7 @@ function planJobs(paths) {
     const base = stem(path.basename(src));
     const twin = count.get(path.join(outDir, base)) > 1;
     const out = path.join(outDir, `${base}${twin ? ` (${path.extname(src).slice(1).toLowerCase()})` : ''}${LABEL}.mp4`);
-    return { src, out, rel, root, done: fs.existsSync(out) };
+    return { src, out, rel, root, paired: !!swap916(path.dirname(src)), done: fs.existsSync(out) };
   });
 }
 

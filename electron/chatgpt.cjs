@@ -1,4 +1,4 @@
-// Sign in with ChatGPT (OpenAI's open-source flow): people use their own ChatGPT Plus/Pro plan in MARCUUS,
+// Sign in with ChatGPT (OpenAI's open-source flow): people use their own ChatGPT Plus/Pro plan in RYACHA,
 // no API key. OAuth + PKCE on a 127.0.0.1 loopback port, dynamic client registration, ID token checked
 // against OpenAI's keys, tokens kept in a 0600 file in the app's data folder (never in logs or the renderer).
 // Contract: https://developers.openai.com/siwc/token-sharing-open-source
@@ -25,7 +25,7 @@ function pkce() {
   return { verifier, challenge: b64url(crypto.createHash('sha256').update(verifier).digest()) };
 }
 
-/** First sign-in registers MARCUUS as a new client (dynamic_agent_client); later ones reuse the issued client ID. */
+/** First sign-in registers RYACHA as a new client (dynamic_agent_client); later ones reuse the issued client ID. */
 function authorizeUrl(authBase, p) {
   const q = {
     client_id: p.clientId || 'dynamic_agent_client',
@@ -92,13 +92,13 @@ function postStream(url, headers, body, signal) {
 }
 const readAll = async (res) => { let s = ''; for await (const c of res) s += c; return s; };
 
-/** OpenAI's plan-usage error codes → what MARCUUS tells the user (code drives the buttons shown). */
+/** OpenAI's plan-usage error codes → what RYACHA tells the user (code drives the buttons shown). */
 function planError(status, err) {
   const code = err?.code || '';
   if (code === 'subscription_sharing_usage_limit_exceeded' || (status === 429 && !code)) {
-    return { code: 'limit', error: 'Limite d’usage atteinte pour MARCUUS sur ton forfait ChatGPT. Tu peux la changer dans ChatGPT › Réglages › Usage.' };
+    return { code: 'limit', error: 'Limite d’usage atteinte pour RYACHA sur ton forfait ChatGPT. Tu peux la changer dans ChatGPT › Réglages › Usage.' };
   }
-  if (code === 'subscription_sharing_user_not_eligible') return { code: 'noteligible', error: 'Ce compte ChatGPT ne peut pas être utilisé dans MARCUUS : il faut un forfait Plus ou Pro.' };
+  if (code === 'subscription_sharing_user_not_eligible') return { code: 'noteligible', error: 'Ce compte ChatGPT ne peut pas être utilisé dans RYACHA : il faut un forfait Plus ou Pro.' };
   if (code === 'subscription_sharing_usage_unavailable' || code === 'subscription_sharing_user_unavailable' || status === 503) {
     return { code: 'unavailable', error: 'ChatGPT est momentanément indisponible. Réessaie dans quelques minutes.' };
   }
@@ -227,7 +227,7 @@ function createChatGPT({ dataDir, openExternal, settings, authBase = 'https://au
     for (let attempt = 0; attempt < 4; attempt++) {
       let a;
       try { a = await session(); } catch (e) { return { ok: false, code: e.code || 'signin', error: e.message }; }
-      if (!hasPlan(a)) return { ok: false, code: 'noplan', error: 'L’usage de ton forfait ChatGPT n’est pas autorisé pour MARCUUS. Reconnecte-toi dans Réglages et accepte l’accès.' };
+      if (!hasPlan(a)) return { ok: false, code: 'noplan', error: 'L’usage de ton forfait ChatGPT n’est pas autorisé pour RYACHA. Reconnecte-toi dans Réglages et accepte l’accès.' };
       const body = {
         model,
         instructions: structured ? system : `${system}\n\nRéponds uniquement avec un objet JSON valide qui respecte ce schéma :\n${JSON.stringify(schema)}`,
@@ -286,8 +286,8 @@ function createChatGPT({ dataDir, openExternal, settings, authBase = 'https://au
 }
 
 function page(ok) {
-  const msg = ok ? 'MARCUUS est connecté à ton compte ChatGPT. Tu peux fermer cet onglet et revenir dans l’app.' : 'La connexion n’a pas abouti. Reviens dans MARCUUS et réessaie.';
-  return `<!doctype html><meta charset="utf-8"><title>MARCUUS</title><body style="font:16px -apple-system,sans-serif;background:#0d0d10;color:#eee;display:grid;place-items:center;height:100vh;margin:0"><p style="max-width:28em;text-align:center">${msg}</p></body>`;
+  const msg = ok ? 'RYACHA est connecté à ton compte ChatGPT. Tu peux fermer cet onglet et revenir dans l’app.' : 'La connexion n’a pas abouti. Reviens dans RYACHA et réessaie.';
+  return `<!doctype html><meta charset="utf-8"><title>RYACHA</title><body style="font:16px -apple-system,sans-serif;background:#0d0d10;color:#eee;display:grid;place-items:center;height:100vh;margin:0"><p style="max-width:28em;text-align:center">${msg}</p></body>`;
 }
 
 module.exports = { createChatGPT, authorizeUrl, verifyIdToken, sseParser, planError, pkce, SCOPES, PLAN_SCOPE };

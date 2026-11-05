@@ -1,0 +1,324 @@
+// Pubs cutting rules. Made-up sentences only: never client material.
+import assert from 'node:assert/strict';
+import pubsLib from '../premiere/lib/pubs.cjs';
+import panelCaptions from '../premiere/lib/captions.cjs';
+import { trimPhrase } from '../src/lib/ads/takes.js';
+import { expand, prepWords, phrases, speechMask, piecesFor, cleanDisfluencies, quoteWords, noRepeats, BODY_GAP, sayWords } from '../src/lib/ads/cut.js';
+
+let n = 0;
+const test = (name, fn) => { fn(); n++; console.log('✓', name); };
+
+// words spaced like real speech: each word 300 ms, `gaps` = pause before word i (ms)
+function say(text, { start = 1000, gaps = {} } = {}) {
+  let t = start;
+  return text.split(' ').map((w, i) => {
+    t += gaps[i] || 0;
+    const word = { text: w, start: t, end: t + 260, p: 1 };
+    t += 300;
+    return word;
+  });
+}
+const speechOf = (raw) => raw.map((w) => [w.start, w.end]);
+
+test('expand: elisions, k, €, numbers', () => {
+  assert.deepEqual(expand("J'ai fait 100k€"), ['j', 'ai', 'fait', '100', '000', 'euros']);
+  assert.deepEqual(expand('C’était 3-4 mois'), ['c', 'etait', '3', '4', 'mois']);
+});
+
+test('phrases break at pauses and full stops', () => {
+  const w = prepWords(say('On y va. Tout de suite maintenant', { gaps: { 5: 600 } }));
+  assert.deepEqual(phrases(w).map((p) => p.length), [3, 2, 2]);
+});
+
+test('fillers and stammered repeats go, the last attempt stays', () => {
+  const w = prepWords(say("c'était euh un c'était un un partenariat"));
+  const { keep, removed } = cleanDisfluencies(w, w.map((_, i) => i));
+  assert.equal(keep.map((i) => w[i].text).join(' '), "c'était un partenariat");
+  assert.ok(removed.includes('euh'));
+});
+
+test('emphasis is not a stammer', () => {
+  const w = prepWords(say("ça allait très très vite"));
+  assert.equal(cleanDisfluencies(w, w.map((_, i) => i)).keep.length, 5);
+});
+
+test('a hesitant first word followed by a pause is dropped', () => {
+  const w = prepWords(say('Et... au bout de trois mois', { gaps: { 1: 700 } }));
+  const { keep } = cleanDisfluencies(w, w.map((_, i) => i));
+  assert.equal(w[keep[0]].text, 'au');
+});
+
+test('quote: extra words he says are cut, paraphrase keeps his words', () => {
+  const w = prepWords(say("franchement on était à moins de dix mille par mois tu vois et je pensais arrêter"));
+  const { idx, coverage } = quoteWords('on était en dessous de dix mille par mois et je pensais arrêter', w);
+  const text = idx.map((i) => w[i].text).join(' ');
+  assert.ok(!text.includes('franchement'), text);
+  assert.ok(text.includes('à moins'), text); // his words where the brief paraphrased
+  assert.ok(!text.includes('tu vois'), text); // two inserted words: cut
+  assert.ok(coverage > 0.6);
+});
+
+test('quote: loose mode keeps everything between the first and last match', () => {
+  const w = prepWords(say('on était tu vois vraiment prêts à arrêter'));
+  const { idx } = quoteWords('on était prêts à arrêter', w, { loose: true });
+  assert.equal(idx.length, w.length);
+});
+
+test('pieces: pauses ≥150 ms are removed, shorter ones kept', () => {
+  const raw = say('un deux trois quatre', { gaps: { 2: 400 } });
+  const w = prepWords(raw);
+  const mask = speechMask(speechOf(raw), 5000);
+  const p = piecesFor(w, [0, 1, 2, 3], mask, 'clip');
+  assert.equal(p.length, 2);
+  assert.ok(p[0].out < raw[2].start && p[1].in > raw[1].end);
+});
+
+test('pieces, body only: a take stays whole, only dead air ≥1 s is cut', () => {
+  const raw = say('un deux trois quatre cinq', { gaps: { 2: 400, 4: 1500 } });
+  const w = prepWords(raw);
+  const p = piecesFor(w, [0, 1, 2, 3, 4], speechMask(speechOf(raw), 6000), 'clip', BODY_GAP);
+  assert.equal(p.length, 2);
+  assert.ok(p[0].out > raw[3].end && p[1].in > raw[3].end, JSON.stringify(p));
+});
+
+test('pieces: a silence inside one word (stop consonant) is never cut', () => {
+  const raw = say('on a fait cinq lancements', { gaps: { 4: 200 } });
+  raw[3].end = raw[3].start + 480; // a long "cinq"
+  const w = prepWords(raw);
+  const runs = speechOf(raw).flatMap(([a, b], i) => (i === 3 ? [[a, a + 80], [a + 250, b]] : [[a, b]])); // 170 ms closure inside it
+  const p = piecesFor(w, [0, 1, 2, 3, 4], speechMask(runs, 5000), 'clip');
+  assert.ok(p.every((x) => !(x.in > raw[3].start && x.in < raw[3].end)), JSON.stringify(p));
+});
+
+test('pieces: sound no word accounts for (a stammer) is cut', () => {
+  const raw = say('je devais les payer', { gaps: { 1: 1200 } });
+  const w = prepWords(raw);
+  w[0].e = raw[1].start - 20; // Whisper stretched "je" over the stammer
+  const runs = [...speechOf(raw), [raw[0].end + 300, raw[0].end + 600]]; // the stammer itself
+  const p = piecesFor(w, [0, 1, 2, 3], speechMask(runs, 6000), 'clip');
+  assert.ok(!p.some((x) => x.in <= raw[0].end + 450 && x.out >= raw[0].end + 450), JSON.stringify(p));
+});
+
+test('no sentence twice: a false start is trimmed, a full retake dropped', () => {
+  const w = prepWords(say("il peut le faire d'ailleurs vous pouvez prendre rendez-vous d'ailleurs vous pouvez prendre rendez-vous sur mon agenda"));
+  const range = (a, b) => Array.from({ length: b - a + 1 }, (_, k) => a + k);
+  const ph = [range(0, 8), range(9, 16)];
+  const { idx, removed } = noRepeats(w, ph);
+  assert.equal(idx.map((i) => w[i].text).join(' '), "il peut le faire d'ailleurs vous pouvez prendre rendez-vous sur mon agenda");
+  assert.ok(removed[0].startsWith('faux départ'));
+  const r2 = noRepeats(w, [range(4, 8), range(9, 16)]);
+  assert.ok(r2.removed[0].startsWith('prise répétée'));
+});
+
+
+// ---- brief + plan (made-up brief) ----
+const { findScripts, parseBriefReply } = await import('../src/lib/ads/brief.js');
+const { planAds, partSequences } = await import('../src/lib/ads/plan.js');
+
+test('brief: scripts found by their "S<n> :" headings', () => {
+  const s = findScripts('Intro\nS1 : Un essai\nAcc1 : bonjour\nS2 – Autre chose\nAcc1 : salut');
+  assert.deepEqual(s.map((x) => [x.id, x.title]), [['S1', 'Un essai'], ['S2', 'Autre chose']]);
+  assert.ok(s[0].text.includes('bonjour') && !s[0].text.includes('salut'));
+});
+
+const line = (text, kind = 'spoken') => ({ who: 'x', kind, text, timecode: '' });
+const part = (...texts) => ({ id: '?', lines: texts.map((t) => (typeof t === 'string' ? line(t) : t)) });
+
+test('plan: two variants, the second borrows the corps → names, bins, folders', () => {
+  const sc = parseBriefReply({ script: 'S9', title: 't', notes: [], variants: [
+    { id: 'V1', name: '', hooks: [part('a'), part('b')], transis: [], corps: [part('c1'), part('c2')], corps_from: '' },
+    { id: 'V2', name: '', hooks: [part('d')], transis: [], corps: [], corps_from: 'V1' },
+  ] }, 'S9');
+  const ads = planAds(sc);
+  assert.equal(ads.length, 2 * 2 + 1 * 2);
+  assert.equal(ads[0].name, 'S9 - V1 - H1 - C1');
+  assert.deepEqual(ads[0].bin, ['S9', 'S9 V1', 'Export', 'Corps 1']);
+  assert.deepEqual(ads[0].folder, ['S9', 'Variante 1', 'Corps 1']);
+  assert.equal(ads.at(-1).name, 'S9 - V2 - H1 - C2');
+  assert.equal(ads.at(-1).corpsVariant, 'V1');
+  const ps = partSequences(sc);
+  assert.deepEqual(ps.map((p) => p.name), ['S9V1 - H1', 'S9V1 - H2', 'Variante 1 - Corps de pub 1', 'Variante 1 - Corps de pub 2', 'S9V2 - H1']);
+  assert.deepEqual(ps[0].bin, ['S9', 'S9 V1', 'Hooks']);
+});
+
+test('plan: testimonial variant with transis, a repeated quote is skipped', () => {
+  const q = (t) => line(t, 'quote');
+  const sc = parseBriefReply({ script: 'S20', title: 't', notes: [], variants: [
+    { id: 'V1', name: 'paul', corps: [part('le corps')], corps_from: '',
+      hooks: [part(q('je pensais tout arrêter cette année')), part(q('on a doublé en trois mois'))],
+      transis: [part(q('on a doublé en trois mois'), 'et toi aussi'), part('autre transition')] },
+  ] }, 'S20');
+  const ads = planAds(sc);
+  assert.equal(ads.length, 4);
+  // one variant in the script (even a named one): no "Variante" anywhere
+  assert.equal(ads[0].name, 'S20 - H1 - T1');
+  assert.deepEqual(ads[0].bin, ['S20', 'Export', 'Transi 1']);
+  assert.deepEqual(ads[0].folder, ['S20', 'Transi 1']);
+  assert.ok(ads.find((a) => a.hook === 'H2' && a.transi === 'T1').skip);
+  assert.ok(!ads.find((a) => a.hook === 'H1' && a.transi === 'T1').skip);
+  assert.equal(partSequences(sc).find((p) => p.key === 'V1|H2').name, 'S20H2');
+  assert.equal(partSequences(sc).find((p) => p.key === 'V1|T2').name, 'S20 - Transi 2');
+});
+
+
+const { buildJob } = await import('../src/lib/ads/plan.js');
+test('job: part sequences first (hooks too), ads only nest them', () => {
+  const sc = parseBriefReply({ script: 'S9', title: 't', notes: [], variants: [
+    { id: 'V1', name: '', hooks: [part('a')], transis: [], corps: [part('c1')], corps_from: '' },
+  ] }, 'S9');
+  const ads = planAds(sc);
+  const pc = (a, b) => ({ media: '/x/rec.mov', in: a, out: b });
+  const parts = { 'V1|H1': { pieces: [pc(5000, 6500)] }, 'V1|C1': { pieces: [pc(10000, 20000)] } };
+  const job = buildJob({ script: sc, parts, live: ads, media: [{ path: '/x/rec.mov', name: 'rec.mov' }] });
+  assert.deepEqual(job.sequences.map((s) => s.name), ['S9H1', 'S9 - Corps de Pub', 'S9 - Full Timeline Review', 'S9 - H1']);
+  assert.deepEqual(job.sequences.map((s) => s.kind), ['hook', 'corps', 'review', 'ad']);
+  assert.deepEqual(job.sequences[0].clips, [{ media: 'M1', in: 5, out: 6.5 }]);
+  assert.deepEqual(job.sequences[0].bin, ['S9', 'Hooks']);
+  assert.deepEqual(job.sequences[2].clips, [{ seq: 'V1|H1' }, { seq: 'V1|C1' }]);
+  assert.deepEqual(job.sequences[3].clips, [{ seq: 'V1|H1' }, { seq: 'V1|C1' }]);
+  assert.deepEqual(job.sequences[3].bin, ['S9', 'Export']);
+  assert.deepEqual(job.importBin, ['Imports']);
+});
+
+
+test('trim inside a phrase: a shared continuation glued to another hook’s first sentence', () => {
+  const w = prepWords(say('pour les gens nés en 1985 et qui adorent courir le matin'));
+  const all = w.map((_, i) => i);
+  const t = trimPhrase(w, all, { phrase: 'R1#1', from: 'et qui adorent', to: '' });
+  assert.equal(t.idx.map((i) => w[i].text).join(' '), 'et qui adorent courir le matin');
+  assert.ok(!t.missed);
+  assert.equal(trimPhrase(w, all, { from: 'pour les gens', to: 'nés en 1985' }).idx.length, 6);
+  const miss = trimPhrase(w, all, { from: 'pas dans la phrase', to: '' });
+  assert.ok(miss.missed && miss.idx.length === all.length); // never cut on a guess
+});
+
+test('review text: elisions Whisper split are glued back', () => {
+  const words = prepWords(say("c 'est d 'accord", { start: 0 }));
+  assert.equal(sayWords(words.map((w) => w.text)), "c'est d'accord");
+});
+
+test('panel captions: the Transcrire rules, bundled for Premiere', () => {
+  const srt = panelCaptions.srtFromEngine({ words: [{ text: ' C', start: 0, end: 200 }, { text: "'est", start: 200, end: 400 }, { text: ' parti.', start: 400, end: 900 }] }, { wordsPerCue: 2, maxChars: 18 });
+  assert.ok(srt.includes("C'est parti."), srt);
+  assert.equal(panelCaptions.srtFromEngine({ words: [] }), '');
+});
+
+test('panel zooms: one per shot on V1, light then full like zoomi, up to the nested corps', () => {
+  const clips = [{ start: 0, end: 0.9 }, { start: 0.9, end: 2.2333 }, { name: 'zoomi zoom', start: 1, end: 2 }, { start: 2.2333, end: 5.4333 }, { start: 5.4333, end: 60 }];
+  const z = pubsLib.zoomsFor(clips, 5.4333, 30, { maxZoom: 138 });
+  assert.deepEqual(z.map((x) => x.scale), [128.5, 138, 128.5]);
+  assert.equal(z[0].start, 0);
+  assert.ok(Math.abs(z[2].end - 5.4333) < 0.02 && Math.abs(z[1].start - 0.9) < 1e-9, JSON.stringify(z));
+  assert.deepEqual(pubsLib.zoomsFor([], 10, 30), []);
+});
+
+test('panel export: ads into <root>/<script>/9x16/<variante>/<corps>, reviews next to them', () => {
+  const job = { script: 'S7', sequences: [
+    { key: 'V1|C1', name: 'S7 - CORPS DE PUB 1', bin: ['2.ADS', 'S7'] },
+    { key: 'ad:S7 - V1 - H1 - C1', name: 'S7 - V1 - H1 - C1', folder: ['S7', 'Variante 1', 'Corps 1'] },
+    { key: 'ad:x', name: 'S15 - Paul - H1 - T1', folder: ['S15', 'Variante Paul', 'Transi 1'] },
+    { key: 'review:V1', name: 'S7 - Full Timeline Review', folder: ['S7'] },
+  ] };
+  assert.deepEqual(pubsLib.exportPlan(job, '/L/Batch').map((p) => p.out), [
+    '/L/Batch/S7/9x16/Variante 1/Corps 1/S7 - V1 - H1 - C1.mp4',
+    '/L/Batch/S15/9x16/Variante Paul/Transi 1/S15 - Paul - H1 - T1.mp4',
+    '/L/Batch/S7/S7 - Full Timeline Review.mp4',
+  ]);
+});
+
+test('panel template: the adjustment layer is resized to the sequence', () => {
+  const xml = '<FrameRect>0,0,1920,1080</FrameRect><Name>Adjustment Layer</Name><MZ.Sequence.PreviewFrameSizeWidth>1920';
+  const out = pubsLib.resizeTemplate(xml, 1080, 1920);
+  assert.ok(out.includes('<FrameRect>0,0,1080,1920</FrameRect>') && out.includes('<Name>zoomi layer 1080x1920</Name>') && out.includes('Width>1080'), out);
+});
+
+test('panel caption style: learned from one styled part, copied to the others, words kept', () => {
+  // a caption blob: [size][style part][u32 length][text][\0][padding]
+  const blob = (part, text) => {
+    const t = Buffer.from(text, 'utf8');
+    const tail = Buffer.alloc(4 + Math.ceil((t.length + 1) / 4) * 4);
+    tail.writeUInt32LE(t.length, 0); t.copy(tail, 4);
+    const b = Buffer.concat([Buffer.alloc(4), part, tail]);
+    b.writeUInt32LE(b.length - 12, 0);
+    return b.toString('base64');
+  };
+  const styled = Buffer.from('..Montserrat-Bold..\0'), plain = Buffer.from('..Monaco....\0\0\0\0');
+  let id = 100;
+  const seq = (name, captions) => {
+    const g = id++, uid = `track-${g}`;
+    const items = captions.map((c) => { const it = id++, bl = id++; return { it, bl, c }; });
+    return [
+      `<Sequence ObjectUID="seq-${g}" Version="1"><TrackGroups><TrackGroup Version="1" Index="0"><First>x</First><Second ObjectRef="${g}"/></TrackGroup></TrackGroups><Name>${name}</Name></Sequence>`,
+      `<DataTrackGroup ObjectID="${g}" Version="1"><Tracks Version="1"><Track Index="0" ObjectURef="${uid}"/></Tracks></DataTrackGroup>`,
+      `<CaptionDataClipTrack ObjectUID="${uid}" Version="1"><ClipItems><TrackItems>${items.map((x, i) => `<TrackItem Index="${i}" ObjectRef="${x.it}"/>`).join('')}</TrackItems></ClipItems><CaptionDataTemplateStyle Encoding="base64" BinaryHash="tpl-0"/></CaptionDataClipTrack>`,
+      ...items.map((x) => `<CaptionDataClipTrackItem ObjectID="${x.it}" Version="3"><BlockVector Version="1"><BlockVectorItem Index="0" ObjectRef="${x.bl}"/></BlockVector></CaptionDataClipTrackItem>`),
+      ...items.map((x) => `<Block ObjectID="${x.bl}" Version="1"><FormattedTextData Encoding="base64" BinaryHash="h-${x.bl}">${blob(x.c[0], x.c[1])}</FormattedTextData></Block>`),
+    ].join('\n');
+  };
+  const project = ['<StyleProjectItem ObjectUID="style-9" Version="1"/>', '<X><CaptionDataTemplateStyle Encoding="base64" BinaryHash="tpl-0">AAAA</CaptionDataTemplateStyle></X>',
+    seq('S2H1', [[styled, 'Si tu'], [styled, 'es coach']]), seq('S2H2', [[plain, 'Moi je'], [plain, 'suis thérapeute']]), seq('Autre', [[plain, 'à garder']])].join('\n');
+  const style = `<StyleProjectItem ObjectUID="style-9" Version="1"/><StartKeyframeValue Encoding="base64" BinaryHash="h">${Buffer.from('..Montserrat-Bold..').toString('base64')}</StartKeyframeValue>`;
+  const learned = pubsLib.learnStyle(project, style, ['S2H1', 'S2H2']);
+  assert.equal(learned.font, 'Montserrat-Bold');
+  const r = pubsLib.styleCaptionTracks(project, style, ['S2H1', 'S2H2'], learned);
+  assert.equal(r.tracks, 2);
+  assert.equal(r.captions, 4);
+  const texts = (xml, name) => {
+    const out = [];
+    for (const m of xml.matchAll(/<Block ObjectID="\d+" Version="1"><FormattedTextData Encoding="base64" BinaryHash="([^"]+)"(?:\/>|>([^<]+)<)/g)) {
+      const data = m[2] || (xml.match(new RegExp(`BinaryHash="${m[1]}">([^<]+)<`)) || [])[1];
+      const b = Buffer.from(data, 'base64'), p = pubsLib.textStart(b);
+      out.push([b.subarray(0, p).toString('latin1').includes(name), b.subarray(p + 4, p + 4 + b.readUInt32LE(p)).toString('utf8')]);
+    }
+    return out;
+  };
+  assert.deepEqual(texts(r.xml, 'Montserrat-Bold'), [[true, 'Si tu'], [true, 'es coach'], [true, 'Moi je'], [true, 'suis thérapeute'], [false, 'à garder']]);
+  assert.equal((r.xml.match(/<ParentStyle ObjectURef="style-9"\/>/g) || []).length, 2);
+  for (const h of r.xml.matchAll(/BinaryHash="([^"]+)"/g)) assert.ok(r.xml.includes(`BinaryHash="${h[1]}">`), `data for ${h[1]}`);
+  assert.throws(() => pubsLib.styleCaptionTracks(project.replace('style-9', 'other'), style, ['S2H1']), /pas encore dans le projet/);
+});
+
+test('panel caption style straight from the file: the sample text link is pointed at each caption’s words', () => {
+  // a style record: header, a link at 20 to the "Aa" sample at 32, then more style data after it
+  const b = Buffer.alloc(56);
+  b.writeUInt32LE(b.length - 12, 0); b.writeUInt32LE(0x11223344, 8);
+  b.writeUInt32LE(32 - 20, 20);
+  b.writeUInt32LE(2, 32); b.write('Aa', 36, 'latin1');
+  b.write('Inter-Bold', 40, 'latin1');
+  const style = `<StyleProjectItem ObjectUID="style-1" Version="1"/><StartKeyframeValue Encoding="base64" BinaryHash="h">${b.toString('base64')}</StartKeyframeValue>`;
+  const r = pubsLib.styleFromFile(style);
+  assert.equal(r.font, 'Inter-Bold');
+  const part = Buffer.from(r.part, 'base64');
+  const tail = Buffer.alloc(12); tail.writeUInt32LE(5, 0); tail.write('Salut', 4, 'utf8');
+  const caption = Buffer.concat([Buffer.alloc(4), part, tail]);
+  caption.writeUInt32LE(caption.length - 12, 0);
+  const at = pubsLib.textStart(caption);
+  assert.equal(at, 56);
+  assert.equal(20 + caption.readUInt32LE(20), at); // the link now reaches the caption's words
+  assert.equal(pubsLib.styleFromFile(style.replace(b.toString('base64'), Buffer.alloc(56).toString('base64'))), null); // no sample: no guess
+});
+
+test('caption text is found even when another number looks like a longer text', () => {
+  // [size][style... a 0x18 that could pass for a 24-byte text ending at the blob's last byte...][5]["tu es"][\0\0\0]
+  const b = Buffer.alloc(48);
+  b.writeUInt32LE(b.length - 12, 0);
+  b.writeUInt32LE(24, 20); // 20 + 4 + 24 = 48: a fake "text" running to the end
+  b.writeUInt32LE(5, 36); b.write('tu es', 40, 'utf8');
+  assert.equal(pubsLib.textStart(b), 36);
+});
+
+test('panel export: 9x16 and 4x5 trees side by side, reviews in 9x16 only', () => {
+  const job = { script: 'S7', sequences: [
+    { key: 'ad:a', name: 'S7 - V1 - H1 - C1', folder: ['S7', 'Variante 1', 'Corps 1'] },
+    { key: 'review:V1', name: 'S7 - Full Timeline Review', folder: ['S7'] },
+    { key: 'V1|H1', name: 'S7V1 - H1' },
+  ] };
+  assert.deepEqual(pubsLib.exportPlan(job, '/L', ['9x16', '4x5']).map((p) => [p.format, p.out]), [
+    ['9x16', '/L/S7/9x16/Variante 1/Corps 1/S7 - V1 - H1 - C1.mp4'],
+    ['4x5', '/L/S7/4x5/Variante 1/Corps 1/S7 - V1 - H1 - C1 4x5.mp4'],
+    ['9x16', '/L/S7/S7 - Full Timeline Review.mp4'],
+  ]);
+  assert.deepEqual(pubsLib.exportPlan(job, '/L', ['4x5']).map((p) => p.format), ['4x5']);
+});
+
+console.log(`ads: ${n} tests OK`);

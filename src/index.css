@@ -31,6 +31,7 @@ body {
   overflow: hidden;
 }
 input, textarea, [data-selectable] { user-select: text; }
+input[type='checkbox'] { accent-color: var(--color-accent); }
 ::selection { background: color-mix(in srgb, var(--color-accent) 40%, transparent); }
 
 .drag { -webkit-app-region: drag; }

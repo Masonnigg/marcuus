@@ -34,6 +34,14 @@ contextBridge.exposeInMainWorld('kit', {
     ask: call('chatgpt:ask'),
     cancel: call('chatgpt:cancel'),
   },
+  ads: {
+    prepare: call('ads:prepare'),
+    listMedia: call('ads:listMedia'),
+    readBrief: call('ads:readBrief'),
+    writeJob: call('ads:writeJob'),
+    onProgress: (fn) => { const h = (_e, p) => fn(p); ipcRenderer.on('ads:progress', h); return () => ipcRenderer.off('ads:progress', h); },
+  },
+  premiere: { status: call('premiere:status'), install: call('premiere:install') },
   version: call('app:version'),
   update: {
     check: call('update:check'),

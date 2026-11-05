@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>RYACHA</title>
+  <style>
+    /* A Premiere bench: the panel's greys, near-invisible edges, and one accent (the playhead orange) kept for the
+       current step, its one action and the zoom point. Progress reads like Premiere's render bar. */
+    :root {
+      color-scheme:dark;
+      --timeline:#1d1d1d;                    /* panel background, as Premiere's own panels */
+      --track:rgba(255,255,255,.03);         /* a step at rest: a whisper above the timeline */
+      --track-open:rgba(255,255,255,.05);    /* the open step */
+      --inset:rgba(0,0,0,.28);               /* lists, fields, previews: set into the panel */
+      --edge:rgba(255,255,255,.08); --edge-soft:rgba(255,255,255,.05); --edge-strong:rgba(255,255,255,.14);
+      --ink:#ececec; --ink-2:#b6b6b6; --ink-3:#8f8f8f; --ink-4:#6c6c6c;
+      --check:#dcdcdc;                       /* checkboxes and switches: Premiere's light grey, not the accent */
+      --playhead:#ff6a3d; --on-playhead:#140802; /* the app's accent and its button text */
+      --render-ok:#5fd68a; --render-warn:#e8b84a; --render-bad:#ff7b72; --render-wait:rgba(255,255,255,.1);
+      --r-sm:5px; --r-md:7px; --r-lg:10px;
+    }
+    * { box-sizing:border-box; }
+    html, body { margin:0; background:var(--timeline); color:var(--ink); font:12.5px/1.45 -apple-system, BlinkMacSystemFont, "Inter", sans-serif; -webkit-font-smoothing:antialiased; }
+    body { padding:12px 12px 24px; }
+    button { font:inherit; color:inherit; cursor:pointer; }
+    button:disabled { cursor:default; }
+    svg { display:block; }
+    h1, h2 { margin:0; font:inherit; }
+    button:focus-visible, select:focus-visible, input:focus-visible, .part:focus-within { outline:2px solid var(--playhead); outline-offset:2px; }
+
+    /* what's open: project and job */
+    header { display:flex; align-items:center; gap:8px; }
+    .brand { font-weight:800; letter-spacing:.16em; font-size:11px; color:var(--ink-3); }
+    .icon { margin-left:auto; width:28px; height:28px; display:grid; place-items:center; border:1px solid var(--edge); border-radius:var(--r-md); background:transparent; color:var(--ink-3); }
+    .icon:hover { color:var(--ink); border-color:var(--edge-strong); }
+    .icon:active { transform:scale(.97); }
+    .context { margin:8px 0 14px; padding-bottom:12px; border-bottom:1px solid var(--edge-soft); }
+    .context .project { font-size:15px; font-weight:600; letter-spacing:-.01em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .context .job { color:var(--ink-2); margin-top:1px; }
+
+    /* the four steps */
+    ol.steps { list-style:none; margin:0; padding:0; display:grid; grid-template-columns:minmax(0, 1fr); gap:6px; } /* minmax: a long path can't widen the panel */
+    .step { border:1px solid var(--edge); border-radius:var(--r-lg); background:var(--track); }
+    .step.open { background:var(--track-open); border-color:var(--edge-strong); }
+    .head { width:100%; display:flex; align-items:center; gap:10px; padding:10px 12px; background:none; border:0; text-align:left; border-radius:var(--r-lg); }
+    .head:hover:not(:disabled) .title { color:var(--ink); }
+    .num { flex:none; width:20px; height:20px; border-radius:50%; display:grid; place-items:center; font-size:11px; font-weight:700; border:1px solid var(--edge-strong); color:var(--ink-3); font-variant-numeric:tabular-nums; }
+    .step.open .num { border-color:var(--playhead); color:var(--playhead); }
+    .step.done:not(.open) .num { border-color:transparent; background:rgba(95,214,138,.14); color:var(--render-ok); }
+    .title { flex:1; font-weight:600; color:var(--ink-2); }
+    .step.open .title { color:var(--ink); }
+    .state { color:var(--ink-3); font-size:11.5px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+    .step.done .state { color:var(--render-ok); }
+    .body { display:none; padding:0 12px 12px 42px; }
+    .step.open .body { display:block; }
+    .hint { color:var(--ink-2); margin:0 0 10px; text-wrap:pretty; }
+    .note { color:var(--ink-3); font-size:11.5px; margin:8px 0 0; text-wrap:pretty; }
+
+    /* the one action of the open step */
+    .go { width:100%; margin-top:12px; padding:9px 12px; border-radius:var(--r-md); border:1px solid var(--edge); background:rgba(255,255,255,.06); font-weight:600; }
+    .step.open .go { background:var(--playhead); border-color:var(--playhead); color:var(--on-playhead); }
+    .step.open .go:hover:not(:disabled) { filter:brightness(1.07); }
+    .step.open .go:active:not(:disabled) { transform:scale(.985); }
+    .step.open .go:disabled { background:rgba(255,255,255,.05); border-color:var(--edge); color:var(--ink-4); }
+    .link { background:none; border:0; padding:0; color:var(--ink-2); text-decoration:underline; text-underline-offset:2px; text-decoration-color:rgba(255,255,255,.25); }
+    .link:hover { color:var(--ink); text-decoration-color:var(--ink-2); }
+
+    /* fields */
+    .row { display:flex; align-items:center; gap:8px; margin-top:8px; min-width:0; }
+    .label { color:var(--ink-3); width:58px; flex:none; }
+    .row .value { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink-2); }
+    .path { direction:rtl; text-align:left; }
+    input, select { font:inherit; color:var(--ink); background:var(--inset); border:1px solid var(--edge); border-radius:var(--r-sm); padding:4px 6px; min-width:0; }
+    select { flex:1; }
+    input[type=checkbox] { accent-color:var(--check); margin:0; width:14px; height:14px; }
+
+    /* step 2: the parts */
+    .parts { border:1px solid var(--edge-soft); border-radius:var(--r-md); background:var(--inset); max-height:220px; overflow:auto; padding:4px 0; }
+    .group { padding:6px 10px 2px; color:var(--ink-3); font-size:10.5px; font-weight:600; letter-spacing:.07em; text-transform:uppercase; }
+    .part { display:flex; align-items:center; gap:8px; padding:3px 10px; cursor:pointer; }
+    .part:hover { background:rgba(255,255,255,.035); }
+    .part .name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .tag { flex:none; color:var(--render-ok); font-size:11px; }
+    .tag.missing { color:var(--ink-3); }
+    .bulk { display:flex; gap:12px; justify-content:flex-end; margin-bottom:6px; font-size:11.5px; }
+    .empty { padding:10px; color:var(--ink-3); font-size:11.5px; text-align:center; }
+    .opt { display:inline-flex; align-items:center; gap:6px; margin-right:12px; color:var(--ink-2); cursor:pointer; }
+    .file .name { font-variant-numeric:tabular-nums; }
+    .tag.warn { color:var(--render-warn); }
+
+    /* progress: a render bar, one segment per sequence (waiting, running, done, skipped, failed) */
+    .activity { margin-top:12px; }
+    .render { display:flex; gap:1px; height:5px; border-radius:2px; overflow:hidden; background:transparent; }
+    .render i { flex:1; min-width:1px; background:var(--render-wait); }
+    .render i.run { background:var(--playhead); }
+    .render i.ok { background:var(--render-ok); }
+    .render i.skip { background:rgba(255,255,255,.22); }
+    .render i.bad { background:var(--render-bad); }
+    .render.solo i { transform-origin:left; } /* a single item: the bar fills inside it */
+    .status { margin-top:7px; color:var(--ink); font-variant-numeric:tabular-nums; text-wrap:pretty; }
+    .status.err { color:var(--render-bad); }
+    details.detail { margin-top:6px; }
+    details.detail summary { cursor:pointer; color:var(--ink-3); font-size:11.5px; width:max-content; }
+    details.detail summary:hover { color:var(--ink-2); }
+    .log { margin-top:4px; max-height:180px; overflow:auto; font-size:11.5px; color:var(--ink-2); }
+    .log div { padding:2px 0; }
+    .ok { color:var(--render-ok); } .skip { color:var(--ink-3); } .err { color:var(--render-bad); } .warn { color:var(--render-warn); }
+
+    /* step 3: zoom point, tracks, preview */
+    .sub { margin-top:16px; }
+    .subhead { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px 8px; margin-bottom:6px; } /* narrow panels: the button drops below its title instead of squeezing it */
+    .subhead.foot { margin:6px 0 0; color:var(--ink-3); font-size:11.5px; }
+    h3 { margin:0; white-space:nowrap; font-size:10.5px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-3); }
+    .subhead .value { color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums; }
+    .chip { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; padding:4px 9px; border:1px solid var(--edge); border-radius:var(--r-md); background:transparent; color:var(--ink-2); font-size:12px; }
+    .chip:hover:not(:disabled) { color:var(--ink); border-color:var(--edge-strong); }
+    .chip:active:not(:disabled) { transform:scale(.97); }
+    .frame { position:relative; margin:0 auto; width:150px; aspect-ratio:9/16; overflow:hidden; border-radius:var(--r-md); background:#000; outline:1px solid var(--edge); cursor:crosshair; }
+    .frame:focus-visible { outline:2px solid var(--playhead); outline-offset:2px; }
+    .frame img { display:block; width:100%; height:100%; object-fit:cover; }
+    .frame p { position:absolute; z-index:1; left:6px; right:6px; bottom:6px; margin:0; padding:6px 7px; border-radius:var(--r-sm); background:rgba(0,0,0,.72); color:var(--ink-2); font-size:10.5px; text-align:center; line-height:1.35; pointer-events:none; text-wrap:balance; }
+    .crop { position:absolute; border:1px solid var(--playhead); pointer-events:none; }
+    .shade { position:absolute; background:rgba(0,0,0,.6); pointer-events:none; } /* what the zoom cuts off */
+    .dot { position:absolute; width:10px; height:10px; margin:-5px 0 0 -5px; border-radius:50%; background:var(--playhead); box-shadow:0 0 0 2px #fff; pointer-events:none; }
+    input[type=range] { width:100%; accent-color:var(--playhead); padding:0; border:0; background:transparent; }
+    table.tracks { width:100%; border-collapse:collapse; font-size:12px; }
+    .tracks th { font-weight:500; color:var(--ink-3); font-size:11px; padding:0 0 4px; text-align:center; width:40%; }
+    .tracks td { padding:5px 0; border-top:1px solid var(--edge-soft); text-align:center; }
+    .tracks td:first-child, .tracks th:first-child { text-align:left; font-family:ui-monospace, Menlo, monospace; color:var(--ink-2); width:20%; }
+    .preview { border:1px solid var(--edge-soft); border-radius:var(--r-md); background:var(--inset); max-height:200px; overflow:auto; padding:6px 8px; min-height:34px; }
+    .prow { display:grid; grid-template-columns:72px 1fr; align-items:center; gap:8px; padding:1px 0; }
+    .prow span { font-size:11px; color:var(--ink-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .prow canvas { width:100%; height:14px; display:block; }
+    .legend { display:flex; gap:9px; }
+    #summary { white-space:nowrap; font-variant-numeric:tabular-nums; }
+    .legend span { display:inline-flex; align-items:center; gap:4px; }
+    .sw { display:inline-block; width:8px; height:8px; border-radius:2px; }
+    .sw.full { background:rgba(255,255,255,.62); } .sw.light { background:rgba(255,255,255,.26); } .sw.cut { width:2px; height:9px; background:var(--playhead); border-radius:0; }
+
+    @media (prefers-reduced-motion: reduce) { * { transition:none !important; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 class="brand" translate="no">RYACHA</h1>
+    <button class="icon" id="reload" title="Recharger le projet et le job" aria-label="Recharger le projet et le job">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+    </button>
+  </header>
+  <div class="context"><div class="project" id="project">…</div><div class="job" id="job">…</div></div>
+
+  <ol class="steps">
+    <li class="step" data-step="1">
+      <h2><button class="head" aria-expanded="false" aria-controls="body1"><span class="num">1</span><span class="title">Importer les rushes et les coupes</span><span class="state" id="state1"></span></button></h2>
+      <div class="body" id="body1">
+        <p class="hint">Une séquence par accroche, transi et corps, puis chaque pub qui les imbrique. N’ajoute que ce qui manque, ne supprime rien.</p>
+        <button class="go" id="build">Importer dans ce projet</button>
+      </div>
+    </li>
+    <li class="step" data-step="2">
+      <h2><button class="head" aria-expanded="false" aria-controls="body2"><span class="num">2</span><span class="title">Sous-titres</span><span class="state" id="state2"></span></button></h2>
+      <div class="body" id="body2">
+        <p class="hint">Après tes corrections. Chaque partie cochée est rendue en mp3, transcrite avec tes réglages de Transcrire, puis sous-titrée : toutes les pubs qui l’imbriquent l’affichent.</p>
+        <div class="bulk"><button class="link" id="allParts">Tout cocher</button><button class="link" id="noParts">Tout décocher</button></div>
+        <div class="parts" id="parts"></div>
+        <div class="row"><label class="label" for="style">Style</label><select id="style"></select><button class="link" id="applyStyle">Appliquer</button></div>
+        <p class="note">Pour poser le style, RYACHA enregistre le projet, le ferme et le rouvre (une copie « avant style » reste à côté).</p>
+        <button class="go" id="captions">Sous-titrer</button>
+      </div>
+    </li>
+    <li class="step" data-step="3">
+      <h2><button class="head" aria-expanded="false" aria-controls="body3"><span class="num">3</span><span class="title">Zooms</span><span class="state" id="state3"></span></button></h2>
+      <div class="body" id="body3">
+        <p class="hint">Un zoom par plan, sur les coupes seulement, dans chaque accroche, transi et corps. Relancer remplace les zooms d’avant.</p>
+
+        <section class="sub">
+          <div class="subhead"><h3>Point de zoom</h3>
+            <button class="chip" id="grab"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3"/></svg>Image du playhead</button>
+          </div>
+          <div class="frame" id="frame" role="button" tabindex="0" aria-label="Point de zoom : clique sur le visage">
+            <img id="frameImage" alt="" hidden>
+            <p id="frameHint">Ouvre une partie, place le playhead sur le visage, puis « Image du playhead ».<br>Clique pour viser.</p>
+            <div class="shade" id="shadeT"></div><div class="shade" id="shadeB"></div><div class="shade" id="shadeL"></div><div class="shade" id="shadeR"></div>
+            <div class="crop" id="crop"></div>
+            <div class="dot" id="dot"></div>
+          </div>
+          <div class="subhead"><h3>Zoom max</h3><span class="value" id="maxZoomLabel"></span></div>
+          <input type="range" id="maxZoom" min="105" max="200" step="1" aria-label="Zoom max">
+        </section>
+
+        <section class="sub">
+          <div class="subhead"><h3>Pistes</h3></div>
+          <table class="tracks" id="tracks"><thead><tr><th></th><th>Zoom</th><th>Ignorer les coupes</th></tr></thead><tbody></tbody></table>
+        </section>
+
+        <section class="sub">
+          <div class="subhead"><h3>Aperçu</h3>
+            <button class="chip" id="analyse"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/></svg>Analyser</button>
+          </div>
+          <div class="preview" id="preview"></div>
+          <div class="subhead foot"><span id="summary" aria-live="polite">Analyse pour voir où tombent les zooms.</span>
+            <span class="legend"><span><i class="sw cut"></i>coupe</span><span><i class="sw light"></i>léger</span><span><i class="sw full"></i>plein</span></span></div>
+        </section>
+
+        <button class="go" id="zoom">Zoomer</button>
+      </div>
+    </li>
+    <li class="step" data-step="4">
+      <h2><button class="head" aria-expanded="false" aria-controls="body4"><span class="num">4</span><span class="title">Export</span><span class="state" id="state4"></span></button></h2>
+      <div class="body" id="body4">
+        <p class="hint">Chaque pub dans Media Encoder, rangée comme tes livrables. Vérifie la liste : rien n’est jamais écrasé.</p>
+        <div class="row"><span class="label">Formats</span>
+          <label class="opt"><input type="checkbox" id="fmt916"> 9x16</label>
+          <label class="opt"><input type="checkbox" id="fmt45"> 4x5</label></div>
+        <div class="row"><label class="label" for="preset">Réglage</label><select id="preset"></select></div>
+        <div class="row"><span class="label">Dossier</span><span class="value path" id="root">…</span><button class="link" id="pickRoot">Choisir…</button></div>
+        <div class="bulk" style="margin-top:10px"><button class="link" id="allFiles">Tout cocher</button><button class="link" id="noFiles">Tout décocher</button></div>
+        <div class="parts" id="files"></div>
+        <label class="opt" style="margin-top:8px"><input type="checkbox" id="startNow"> Lancer le rendu tout de suite</label>
+        <button class="go" id="export">Exporter</button>
+        <p class="note">Les 4x5 sont des séquences 1080×1350 dans « Export 4x5 », qui imbriquent chaque pub : recadre-les à la main si besoin, RYACHA ne les refait jamais.</p>
+      </div>
+    </li>
+  </ol>
+
+  <div class="activity" id="activity" hidden>
+    <div class="render" id="render" aria-hidden="true"></div>
+    <div class="status" id="status" role="status" aria-live="polite"></div>
+    <details class="detail" id="detail"><summary id="detailSum">Détail</summary><div class="log" id="log"></div></details>
+  </div>
+  <script src="panel.js"></script>
+</body>
+</html>

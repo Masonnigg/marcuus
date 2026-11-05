@@ -343,7 +343,7 @@ function Setup({ status, install, onInstall, onRecheck }) {
         <div className="card rise mx-auto max-w-xl p-6 text-center">
           <Cpu className="mx-auto mb-3 text-faint" />
           <div className="text-[15px] font-semibold">Transcription indisponible sur ce Mac</div>
-          <p className="mt-1.5 text-mute">Le moteur Whisper (MLX) a besoin d’une puce Apple : M1, M2, M3, M4 ou plus récent. Cette version de MARCUUS est celle pour Mac Intel. Sur un Mac à puce Apple, installe plutôt le fichier « arm64 ».</p>
+          <p className="mt-1.5 text-mute">Le moteur Whisper (MLX) a besoin d’une puce Apple : M1, M2, M3, M4 ou plus récent. Cette version de RYACHA est celle pour Mac Intel. Sur un Mac à puce Apple, installe plutôt le fichier « arm64 ».</p>
           <p className="mt-3 text-mute">Le SRT Fixer, le B-roll et les Palettes fonctionnent normalement. Pour les sous-titres, utilise TurboScribe puis le SRT Fixer.</p>
         </div>
       </div>
