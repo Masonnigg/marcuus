@@ -71,7 +71,8 @@ for (const [arch, a] of Object.entries(assets)) {
   console.log(`${arch} : ${same ? `mise à jour légère depuis ${previous.version} (${(a.patch.size / 1e6).toFixed(1)} Mo)` : `téléchargement complet (${(a.size / 1e6).toFixed(0)} Mo) : la base a changé`}`);
 }
 
-run('gh', ['release', 'create', tag, '--repo', RELEASES_REPO, '--title', `MARCUUS ${version}`, '--notes', notes, ...files]);
+// the public release page stays bare: the notes are only in latest.json, for the app's update screen
+run('gh', ['release', 'create', tag, '--repo', RELEASES_REPO, '--title', `MARCUUS ${version}`, '--notes', '', ...files]);
 
 // latest.json goes last: installed apps only see the new version once its downloads exist
 const latest = { version, notes, date: new Date().toISOString(), assets };

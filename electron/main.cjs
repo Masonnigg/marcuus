@@ -8,7 +8,9 @@ const DEV_URL = process.env.EDITKIT_DEV_URL;
 
 // Keep using the data folder from when the app was called "Edit Kit" (palettes, keys, settings).
 // MARCUUS_USER_DATA: a separate data folder for tests, so they never touch the real sessions.
-app.setName('RYACHA'); // the name people see (menus, Dock); the bundle stays MARCUUS.app so updates keep working
+// the name people see; the bundle stays MARCUUS.app so updates keep working, and CFBundleName stays MARCUUS:
+// Electron finds its helper apps ("MARCUUS Helper.app") by it, another name and the app does not start
+app.setName('RYACHA');
 app.setPath('userData', process.env.MARCUUS_USER_DATA || path.join(app.getPath('appData'), 'Edit Kit'));
 const dataDir = () => app.getPath('userData');
 const storePath = (key) => path.join(dataDir(), `${key.replace(/[^a-z0-9_-]/gi, '')}.json`);
