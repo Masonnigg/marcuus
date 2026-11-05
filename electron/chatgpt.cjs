@@ -29,7 +29,7 @@ function pkce() {
 function authorizeUrl(authBase, p) {
   const q = {
     client_id: p.clientId || 'dynamic_agent_client',
-    ...(p.clientId ? {} : { agent_name_hint: 'MARCUUS' }),
+    ...(p.clientId ? {} : { agent_name_hint: 'RYACHA' }),
     ext_agent_host_id: p.hostId,
     ...(p.clientId && p.idTokenHint ? { id_token_hint: p.idTokenHint } : {}),
     ...(p.clientId && p.loginHint ? { login_hint: p.loginHint } : {}),

@@ -18,7 +18,7 @@ const { verifier, challenge } = pkce();
 check('PKCE: challenge = base64url(sha256(verifier)), no padding', challenge === createHash('sha256').update(verifier).digest('base64url') && !challenge.includes('='));
 const first = new URL(authorizeUrl('https://auth.openai.com', { hostId: 'h1', redirectUri: 'http://127.0.0.1:1455/auth/callback', state: 's', nonce: 'n', challenge: 'c', idTokenHint: 'old', loginHint: 'a@b.c' }));
 const q = Object.fromEntries(first.searchParams);
-check('first sign-in registers MARCUUS', q.client_id === 'dynamic_agent_client' && q.agent_name_hint === 'MARCUUS' && !q.id_token_hint && !q.login_hint, JSON.stringify(q));
+check('first sign-in registers RYACHA', q.client_id === 'dynamic_agent_client' && q.agent_name_hint === 'RYACHA' && !q.id_token_hint && !q.login_hint, JSON.stringify(q));
 check('authorize: OpenAI’s exact scopes, resource, S256, loopback', q.scope === SCOPES && SCOPES.includes('chatgpt.tokens.use.direct') && q.resource === 'https://api.openai.com/v1'
   && q.code_challenge_method === 'S256' && q.response_type === 'code' && q.redirect_uri === 'http://127.0.0.1:1455/auth/callback' && first.pathname === '/api/accounts/authorize');
 check('values are percent-encoded (spaces as %20)', first.search.includes('scope=openid%20profile') && !first.search.includes('+'));

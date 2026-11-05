@@ -1,4 +1,4 @@
-"""MARCUUS ads engine: a transcript you can cut ads from.
+"""RYACHA ads engine: a transcript you can cut ads from.
 
 usage: python ads_prepare.py <audio.wav> <out.json>
 
@@ -10,7 +10,7 @@ Plain Whisper isn't safe for picking takes from a long raw recording, so on top 
   5. A second pass with a hesitant-sounding prompt writes stammers, "euh" and restarts down. It is used
      only where it says the same thing as the normal pass (it sometimes drifts into nonsense).
 Output (ms): {"duration", "words": [{text, start, end, p}], "chunks": [[a, b]], "speech": [[a, b]]}.
-Progress goes to stderr as "[marcuus ...] step" lines and "NN%|" bars.
+Progress goes to stderr as "[ryacha ...] step" lines and "NN%|" bars.
 """
 import json
 import os
@@ -24,7 +24,7 @@ T0 = time.time()
 
 
 def log(msg):
-    print(f"[marcuus {time.time() - T0:5.1f}s] {msg}", file=sys.stderr, flush=True)
+    print(f"[ryacha {time.time() - T0:5.1f}s] {msg}", file=sys.stderr, flush=True)
 
 
 def progress(pct):

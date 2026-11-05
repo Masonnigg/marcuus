@@ -2,7 +2,7 @@
 # Links this folder into Premiere's extensions. Restart Premiere afterwards, then Window › Extensions › RYACHA.
 set -e
 ROOT="${0:A:h:h}"
-DEST="$HOME/Library/Application Support/Adobe/CEP/extensions/com.reda.marcuus.pubs"
+DEST="$HOME/Library/Application Support/Adobe/CEP/extensions/com.reda.ryacha.pubs"
 mkdir -p "${DEST:h}"
 if [[ -e "$DEST" && ! -L "$DEST" ]]; then
   echo "Refusing to replace a real folder at $DEST" >&2

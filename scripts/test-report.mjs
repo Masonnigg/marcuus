@@ -8,7 +8,7 @@ const { createReporter, buildEvent, scrub, frames, parseDsn } = createRequire(im
 
 let n = 0;
 const test = async (name, fn) => { await fn(); n++; console.log('✓', name); };
-const ROOT = '/Applications/MARCUUS.app/Contents/Resources/app.asar';
+const ROOT = '/Applications/RYACHA.app/Contents/Resources/app.asar';
 const leaks = (s) => /Users|Volumes|Paul|Studio|Lune|dupont|\/tmp\//i.test(s);
 
 await test('paths and file names are taken out, the app’s own code keeps its place', () => {

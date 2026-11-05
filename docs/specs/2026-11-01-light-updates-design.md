@@ -6,7 +6,7 @@ slow to ~30 KB/s for a while, which made an update take 1.5 h. Comparing real bu
 between two versions: `app.asar`, `Info.plist`, the code seal and the small launchers (1.5 MB, 0.5 MB zipped).
 
 ## How (electron/update-files.cjs)
-- Each release adds `MARCUUS-<v>-<arch>.patch.zip` with those files, and `patch: { url, sha256, size, base, full }`
+- Each release adds `RYACHA-<v>-<arch>.patch.zip` with those files, and `patch: { url, sha256, size, base, full }`
   in latest.json. Older apps ignore `patch` and use the full zip.
 - `base` = fingerprint of everything the patch does not contain. `full` = fingerprint of the whole bundle.
 - Installed app: same `base` → download the patch, copy itself, swap the patched parts, check the result has the

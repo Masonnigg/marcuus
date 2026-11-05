@@ -1,4 +1,4 @@
-// Puts the tools MARCUUS ships inside the app into vendor/arm64/bin (run automatically before `npm run dist`):
+// Puts the tools RYACHA ships inside the app into vendor/arm64/bin (run automatically before `npm run dist`):
 //   ffmpeg  – static build from the ffmpeg-static npm package (no Homebrew needed on the user's Mac)
 //   uv      – official Astral release, used to install the transcription engine
 import { execFileSync } from 'node:child_process';

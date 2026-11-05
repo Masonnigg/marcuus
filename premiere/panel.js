@@ -101,10 +101,11 @@
 
   // ---------- tools on this Mac (Premiere starts without the shell's PATH) ----------
   const first = (list) => list.find((p) => { try { return fs.existsSync(p); } catch (e) { return false; } }) || null;
-  const APPS = ['/Applications/MARCUUS.app', '/Applications/RYACHA.app']; // the app's bundle keeps its old file name; a renamed copy works too
-  const ffmpeg = () => first(['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', ...APPS.map((a) => `${a}/Contents/Resources/bin/ffmpeg`), path.join(REPO, 'vendor', process.arch, 'bin', 'ffmpeg')]);
+  // the app's tools: where RYACHA says it is (it writes it at each start), else where it is installed by default
+  const RESOURCES = [(() => { try { return JSON.parse(fs.readFileSync(path.join(DATA, 'app.json'), 'utf8')).resources; } catch (e) { return null; } })(), '/Applications/RYACHA.app/Contents/Resources'].filter(Boolean);
+  const ffmpeg = () => first(['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', ...RESOURCES.map((r) => `${r}/bin/ffmpeg`), path.join(REPO, 'vendor', process.arch, 'bin', 'ffmpeg')]);
   const python = () => first([path.join(APP_DATA, 'engine', '.venv', 'bin', 'python')]);
-  const engine = () => first([path.join(REPO, 'electron', 'engine', 'transcribe_mlx.py'), ...APPS.map((a) => `${a}/Contents/Resources/app.asar.unpacked/electron/engine/transcribe_mlx.py`)]);
+  const engine = () => first([path.join(REPO, 'electron', 'engine', 'transcribe_mlx.py'), ...RESOURCES.map((r) => `${r}/app.asar.unpacked/electron/engine/transcribe_mlx.py`)]);
   function premierePreset(rel) {
     try {
       for (const a of fs.readdirSync('/Applications').filter((n) => /^Adobe Premiere Pro/.test(n)).sort().reverse()) {

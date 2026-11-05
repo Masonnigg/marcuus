@@ -1,4 +1,4 @@
-# MARCUUS
+# RYACHA
 
 macOS app (Electron + React).
 

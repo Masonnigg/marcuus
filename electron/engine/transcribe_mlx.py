@@ -1,7 +1,7 @@
-"""MARCUUS transcription engine: Whisper large-v3-turbo on Apple's MLX (GPU).
+"""RYACHA transcription engine: Whisper large-v3-turbo on Apple's MLX (GPU).
 usage: python transcribe_mlx.py <audio.wav> <language> <prompt>
        python transcribe_mlx.py --warmup        (compile everything once, right after install)
-Progress goes to stderr: tqdm "NN%|" bars and "[marcuus 1.2s] step" lines. Result JSON goes to stdout.
+Progress goes to stderr: tqdm "NN%|" bars and "[ryacha 1.2s] step" lines. Result JSON goes to stdout.
 """
 import json
 import os
@@ -12,7 +12,7 @@ T0 = time.time()
 
 
 def log(msg):
-    print(f"[marcuus {time.time() - T0:5.1f}s] {msg}", file=sys.stderr, flush=True)
+    print(f"[ryacha {time.time() - T0:5.1f}s] {msg}", file=sys.stderr, flush=True)
 
 
 # mlx-whisper's word timing uses numba, which recompiles in every new process unless told to cache.

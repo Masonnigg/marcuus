@@ -1,25 +1,25 @@
-MARCUUS — installation
+RYACHA — installation
 ======================
 
 1. INSTALLER
-   Glisse MARCUUS dans le dossier Applications (la flèche à droite).
+   Glisse RYACHA dans le dossier Applications (la flèche à droite).
 
    Quel fichier ?
-   - Mac avec puce Apple (M1, M2, M3, M4…) : MARCUUS-…-arm64.dmg
-   - Mac Intel (avant 2020) : MARCUUS-…-x64.dmg
+   - Mac avec puce Apple (M1, M2, M3, M4…) : RYACHA-…-arm64.dmg
+   - Mac Intel (avant 2020) : RYACHA-…-x64.dmg
      (sur Intel, l'onglet Transcrire n'est pas disponible)
    Pour savoir : menu Pomme  > À propos de ce Mac > « Puce » ou « Processeur ».
 
 2. PREMIÈRE OUVERTURE
-   MARCUUS n'est pas vendu sur l'App Store, donc macOS demande une confirmation la première fois :
-   a. Double-clique sur MARCUUS. Un message dit qu'il n'a pas pu être vérifié : clique sur « Terminé ».
+   RYACHA n'est pas vendu sur l'App Store, donc macOS demande une confirmation la première fois :
+   a. Double-clique sur RYACHA. Un message dit qu'il n'a pas pu être vérifié : clique sur « Terminé ».
    b. Ouvre Réglages Système > Confidentialité et sécurité, descends en bas :
-      clique sur « Ouvrir quand même » à côté de MARCUUS, puis confirme.
+      clique sur « Ouvrir quand même » à côté de RYACHA, puis confirme.
    C'est à faire une seule fois.
 
    Si macOS dit que l'app est « endommagée » : ouvre le Terminal et colle
-       xattr -dr com.apple.quarantine /Applications/MARCUUS.app
-   puis relance MARCUUS.
+       xattr -dr com.apple.quarantine /Applications/RYACHA.app
+   puis relance RYACHA.
 
 3. TRANSCRIRE (Mac à puce Apple)
    Onglet Transcrire > « Installer » : télécharge le moteur et le modèle Whisper

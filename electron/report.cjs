@@ -3,7 +3,7 @@
 //  - sent: the error message and where it happened (cleaned by scrub()), the app and macOS versions, and an
 //    anonymous id per installation, so Sentry can count how many Macs it happens on;
 //  - never sent: file paths, file names, scripts, transcripts, e-mail addresses;
-//  - Réglages › "Rapports d'erreur" turns it off. MARCUUS_SENTRY_DSN points it elsewhere (tests).
+//  - Réglages › "Rapports d'erreur" turns it off. RYACHA_SENTRY_DSN points it elsewhere (tests).
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -77,7 +77,7 @@ function buildEvent({ error, message, where, level = 'error', tags = {}, release
  * The reporter of the running app. enabled() reads Réglages each time; fetch is Electron's net.fetch.
  * A session sends at most 30 reports, and the same error from the same place only once.
  */
-function createReporter({ version, dataDir, enabled, fetch, system, dsn = process.env.MARCUUS_SENTRY_DSN || DSN }) {
+function createReporter({ version, dataDir, enabled, fetch, system, dsn = process.env.RYACHA_SENTRY_DSN || DSN }) {
   const target = parseDsn(dsn);
   const seen = new Set();
   let sent = 0;

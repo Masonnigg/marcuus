@@ -22,7 +22,7 @@ Short clip (≤ 2 min 30) → 1 moment. Long recording → 2 to 5 moments, best 
 ## Pieces
 - `src/lib/hook.js` — pure: `linesFromWords`, `buildHookRequest`, `parseHookReply`, `momentToText`. Tested by `scripts/test-hook.mjs`.
 - `electron/main.cjs` — `openai:ask` (key + model read from settings in the main process), `openai:cancel`, `openai:status`.
-  Base URL overridable with `MARCUUS_OPENAI_URL` for tests. French error messages (no key, bad key, no credit, model, network, timeout, refusal).
+  Base URL overridable with `RYACHA_OPENAI_URL` for tests. French error messages (no key, bad key, no credit, model, network, timeout, refusal).
 - `src/pages/Hook.jsx` — file list + queue (transcribe → analyse), progress, result cards with ▶ playback, copy buttons, "Relancer l'analyse". Session saved in `hookSession`. Stays mounted like Transcrire.
 - Réglages — OpenAI key, model (Rapide `gpt-6-luna` · Équilibré `gpt-6.1-sol` default · Le meilleur `gpt-6-astra`), "Tester".
 - Transcrire — "Hook" button sends the current file (edited captions if any).

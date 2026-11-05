@@ -1,13 +1,13 @@
 # Continue with ChatGPT (2026-10-28)
 
 ## Goal
-People analyse with their own ChatGPT Plus/Pro plan, with no API key. MARCUUS went open source (GPL-3.0) so it can use
+People analyse with their own ChatGPT Plus/Pro plan, with no API key. RYACHA went open source (GPL-3.0) so it can use
 OpenAI's plan usage for open-source apps (https://developers.openai.com/siwc/token-sharing-open-source).
 Anthropic does not allow third-party apps to offer claude.ai login to other people, so Claude stays only where
-Claude Code is already connected on the Mac, and MARCUUS no longer explains how to install or log into it.
+Claude Code is already connected on the Mac, and RYACHA no longer explains how to install or log into it.
 
 ## Flow (electron/chatgpt.cjs)
-- Authorize in the system browser: `client_id=dynamic_agent_client` + `agent_name_hint=MARCUUS` the first time,
+- Authorize in the system browser: `client_id=dynamic_agent_client` + `agent_name_hint=RYACHA` the first time,
   the issued `oaiapp_…` client later (with id_token/login hints when a session expired). `ext_agent_host_id` =
   one `urn:uuid:…` per Mac (a bare UUID is refused). PKCE S256, state, nonce, loopback
   `http://127.0.0.1:1455/auth/callback` (another port if busy), scopes

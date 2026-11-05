@@ -86,11 +86,11 @@ console.log(JSON.stringify(d) === JSON.stringify(['vont t', "'encourager"]) ? 'o
   const disk = new Set(['/a/turbo.srt']);
   const exists = async (p) => disk.has(p);
   check('next to the media', await srtTarget({ path: '/a/clip.mp4' }, exists) === '/a/clip.srt');
-  check('an existing .srt is never replaced', await srtTarget({ path: '/a/turbo.mp4' }, exists) === '/a/turbo - MARCUUS.srt');
+  check('an existing .srt is never replaced', await srtTarget({ path: '/a/turbo.mp4' }, exists) === '/a/turbo - RYACHA.srt');
   check('its own earlier export is reused', await srtTarget({ path: '/a/clip.mp4', savedTo: '/x/mine.srt' }, exists) === '/x/mine.srt');
   const taken = new Set();
   const names = [];
   for (const path of ['/a/same.mp4', '/a/same.mov', '/a/same.mp3']) { const p = await srtTarget({ path }, exists, taken); taken.add(p); names.push(p); }
-  check('same name in one batch: three different files', new Set(names).size === 3 && names[0] === '/a/same.srt' && names[1] === '/a/same - MARCUUS.srt' && names[2] === '/a/same - MARCUUS 2.srt', names.join(' | '));
+  check('same name in one batch: three different files', new Set(names).size === 3 && names[0] === '/a/same.srt' && names[1] === '/a/same - RYACHA.srt' && names[2] === '/a/same - RYACHA 2.srt', names.join(' | '));
 }
 process.exit(fail ? 1 : 0);

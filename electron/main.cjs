@@ -7,11 +7,28 @@ const { spawn } = require('node:child_process');
 const DEV_URL = process.env.EDITKIT_DEV_URL;
 
 // Keep using the data folder from when the app was called "Edit Kit" (palettes, keys, settings).
-// MARCUUS_USER_DATA: a separate data folder for tests, so they never touch the real sessions.
-// the name people see; the bundle stays MARCUUS.app so updates keep working, and CFBundleName stays MARCUUS:
-// Electron finds its helper apps ("MARCUUS Helper.app") by it, another name and the app does not start
+// RYACHA_USER_DATA: a separate data folder for tests, so they never touch the real sessions (nor the real Premiere).
+// A build from before the rename relaunches this one after an update with its own name for it: any *_USER_DATA counts.
+const TEST_DATA = process.env.RYACHA_USER_DATA || Object.entries(process.env).find(([k]) => /^[A-Z]+_USER_DATA$/.test(k))?.[1] || null;
 app.setName('RYACHA');
-app.setPath('userData', process.env.MARCUUS_USER_DATA || path.join(app.getPath('appData'), 'Edit Kit'));
+app.setPath('userData', TEST_DATA || path.join(app.getPath('appData'), 'Edit Kit'));
+
+// The bundle is RYACHA.app. A Mac updated by a build that knew the bundle under its first name gets this app in a
+// folder of that name: it moves itself to RYACHA.app once, then starts again from there. (CFBundleName and the helper
+// apps carry the product name together: Electron finds its helpers by it.)
+function settleBundleName() {
+  if (!app.isPackaged) return false;
+  const bundle = path.resolve(app.getPath('exe'), '..', '..', '..');
+  if (!/^[A-Z]+\.app$/.test(path.basename(bundle)) || path.basename(bundle) === 'RYACHA.app' || bundle.includes('/AppTranslocation/')) return false;
+  const target = path.join(path.dirname(bundle), 'RYACHA.app');
+  if (fs.existsSync(target)) return false; // a RYACHA.app is already there: leave both alone
+  try { fs.renameSync(bundle, target); } catch { return false; } // not allowed to: it keeps running where it is
+  const env = TEST_DATA ? `--env RYACHA_USER_DATA="${TEST_DATA}" ` : '';
+  spawn('/bin/sh', ['-c', `sleep 1; /usr/bin/open ${env}"${target}"`], { detached: true, stdio: 'ignore' }).unref();
+  app.exit(0);
+  return true;
+}
+if (settleBundleName()) return;
 const dataDir = () => app.getPath('userData');
 const storePath = (key) => path.join(dataDir(), `${key.replace(/[^a-z0-9_-]/gi, '')}.json`);
 
@@ -54,7 +71,7 @@ handleIpc('report:send', (_e, r) => {
 app.on('render-process-gone', (_e, _wc, d) => { if (d.reason !== 'clean-exit') reporter.message(`Écran fermé : ${d.reason} (code ${d.exitCode})`, 'écran', {}, 'error'); });
 app.on('child-process-gone', (_e, d) => { if (!['clean-exit', 'killed'].includes(d.reason)) reporter.message(`Processus ${d.type} arrêté : ${d.reason} (code ${d.exitCode})`, 'app', {}, 'error'); });
 // The Premiere panel writes its errors next to the job; the app sends them (it has the setting and the network).
-const PANEL_ERRORS = process.env.MARCUUS_PANEL_ERRORS || path.join(os.homedir(), 'Library', 'Application Support', 'Edit Kit', 'pubs', 'panel-errors.jsonl');
+const PANEL_ERRORS = process.env.RYACHA_PANEL_ERRORS || path.join(os.homedir(), 'Library', 'Application Support', 'Edit Kit', 'pubs', 'panel-errors.jsonl');
 function sendPanelErrors() {
   const taken = `${PANEL_ERRORS}.sending`;
   try { fs.renameSync(PANEL_ERRORS, taken); } catch { return; }
@@ -100,6 +117,14 @@ function createWindow() {
 app.whenReady().then(() => {
   createWindow();
   refreshPanel(); // an app update brings the Premiere panel's new version along
+  // where this app's tools are (ffmpeg, the transcription engine), for the Premiere panel
+  if (app.isPackaged && !TEST_DATA) {
+    try {
+      const f = path.join(dataDir(), 'pubs', 'app.json');
+      fs.mkdirSync(path.dirname(f), { recursive: true });
+      fs.writeFileSync(f, JSON.stringify({ resources: process.resourcesPath, version: app.getVersion() }));
+    } catch {}
+  }
   setInterval(async () => {
     const u = await checkForUpdate();
     if (u) BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('update:available', publicUpdate(u)));
@@ -310,7 +335,7 @@ ipcMain.handle('file:writeText', async (e, defaultPath, content, ext = 'md') => 
 
 // ---- ChatGPT (OpenAI API key from Réglages) ------------------------------
 // The key never leaves the main process. Answers are forced into a JSON schema (Structured Outputs).
-const OPENAI_URL = process.env.MARCUUS_OPENAI_URL || 'https://api.openai.com/v1';
+const OPENAI_URL = process.env.RYACHA_OPENAI_URL || 'https://api.openai.com/v1';
 const OPENAI_DEFAULT_MODEL = 'gpt-6.1-sol';
 const openaiConf = () => ({ key: (settings().keys?.openai || '').trim(), model: settings().openaiModel || OPENAI_DEFAULT_MODEL });
 
@@ -379,9 +404,9 @@ const chatgpt = createChatGPT({
   dataDir,
   settings,
   // tests sign in against a fake server: follow its redirect here instead of opening the browser
-  openExternal: (url) => (process.env.MARCUUS_TEST_NO_BROWSER ? fetch(url).then(() => {}) : shell.openExternal(url)),
-  authBase: process.env.MARCUUS_CHATGPT_AUTH || undefined,
-  apiBase: process.env.MARCUUS_OPENAI_URL || undefined,
+  openExternal: (url) => (process.env.RYACHA_TEST_NO_BROWSER ? fetch(url).then(() => {}) : shell.openExternal(url)),
+  authBase: process.env.RYACHA_CHATGPT_AUTH || undefined,
+  apiBase: process.env.RYACHA_OPENAI_URL || undefined,
   log: (line) => journal(line),
 });
 const chatgptCall = (fn) => async (...args) => {
@@ -592,7 +617,7 @@ ipcMain.handle('whisper:transcribe', async (e, filePath, opts = {}) => {
   if (!ffmpeg) throw new Error('ffmpeg manquant. Dans le Terminal : brew install ffmpeg');
   if (!fs.existsSync(enginePy()) || !modelReady()) throw new Error('Moteur pas encore installé.');
   const send = (p) => { if (!e.sender.isDestroyed()) e.sender.send('whisper:progress', { filePath, ...p }); };
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'marcuus-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ryacha-'));
   try {
     send({ stage: 'audio', pct: 0 });
     const wav = path.join(tmp, 'audio.wav');
@@ -607,7 +632,7 @@ ipcMain.handle('whisper:transcribe', async (e, filePath, opts = {}) => {
       onOutput: (chunk) => {
         const m = [...chunk.matchAll(/(\d+)%\|/g)].pop();
         if (m) send({ stage: 'transcribe', pct: +m[1], note: null });
-        const step = [...chunk.matchAll(/\[marcuus[^\]]*\] ([^\n]+)/g)].pop();
+        const step = [...chunk.matchAll(/\[ryacha[^\]]*\] ([^\n]+)/g)].pop();
         if (step) send({ stage: 'transcribe', note: step[1] });
       },
     });
@@ -621,9 +646,43 @@ ipcMain.handle('whisper:transcribe', async (e, filePath, opts = {}) => {
 // ---- the Premiere panel (RYACHA) ships inside the app and is installed from it ----------------------------
 // It lives in app.asar.unpacked so light updates carry it. Installing copies it into Premiere's extensions
 // folder and turns on Adobe's flag for unsigned panels. A developer's symlink there is never replaced.
-const PANEL_ID = 'com.reda.marcuus.pubs';
+const PANEL_ID = 'com.reda.ryacha.pubs';
+// Premiere's folders for panels (in the test data folder for tests: they never touch the real Premiere)
+const CEP_HOME = TEST_DATA ? path.join(TEST_DATA, 'cep') : path.join(os.homedir(), 'Library');
+const CEP_EXTENSIONS = path.join(CEP_HOME, 'Application Support', 'Adobe', 'CEP', 'extensions');
+const CEP_CACHE = path.join(CEP_HOME, 'Caches', 'CSXS', 'cep_cache');
 const panelSource = () => path.join(__dirname, '..', 'premiere').replace('app.asar', 'app.asar.unpacked');
-const panelDest = () => path.join(os.homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', PANEL_ID);
+const panelDest = () => path.join(CEP_EXTENSIONS, PANEL_ID);
+const listDir = (dir) => { try { return fs.readdirSync(dir); } catch { return []; } };
+/**
+ * The panel this app installed under its first ID → removed, its settings (export folders, caption styles, zoom
+ * point…) carried over: Premiere keeps a panel's storage in its cache under the panel's ID. A developer link follows.
+ * → true when there was one.
+ */
+function migrateOldPanel() {
+  const OLD = /^com\.reda\.(?!ryacha\.)[a-z]+\.pubs$/;
+  let found = false;
+  for (const name of listDir(CEP_EXTENSIONS).filter((n) => OLD.test(n))) {
+    found = true;
+    const old = path.join(CEP_EXTENSIONS, name);
+    if (fs.lstatSync(old).isSymbolicLink()) {
+      if (!fs.existsSync(panelDest())) fs.symlinkSync(fs.readlinkSync(old), panelDest());
+      fs.unlinkSync(old);
+    } else fs.rmSync(old, { recursive: true, force: true });
+  }
+  for (const name of listDir(CEP_CACHE)) {
+    const m = name.match(/^(.+)_com\.reda\.(?!ryacha\.)[a-z]+\.pubs\.panel$/);
+    if (!m) continue;
+    const from = path.join(CEP_CACHE, name), to = path.join(CEP_CACHE, `${m[1]}_${PANEL_ID}.panel`);
+    if (!fs.existsSync(to)) {
+      fs.mkdirSync(to, { recursive: true });
+      try { fs.cpSync(path.join(from, 'Local Storage'), path.join(to, 'Local Storage'), { recursive: true }); } catch {}
+    }
+    fs.rmSync(from, { recursive: true, force: true });
+  }
+  if (found) journal('panneau Premiere : ancien identifiant remplacé, réglages repris');
+  return found;
+}
 const panelMark = () => path.join(panelDest(), '.ryacha-version');
 function panelStatus() {
   const dest = panelDest();
@@ -652,8 +711,9 @@ function installPanel() {
 // installed earlier and older than this app: bring it up to date (a link or no panel: nothing to do)
 function refreshPanel() {
   try {
+    const had = migrateOldPanel();
     const st = panelStatus();
-    if (st.installed && !st.linked && st.available && st.version !== st.appVersion) installPanel();
+    if ((had && !st.installed && st.available) || (st.installed && !st.linked && st.available && st.version !== st.appVersion)) installPanel();
   } catch (err) { journal(`panneau Premiere : ${err.message}`); }
 }
 ipcMain.handle('premiere:status', () => panelStatus());
@@ -711,7 +771,7 @@ ipcMain.handle('ads:prepare', async (e, filePath) => {
     return result;
   }
   const send = (p) => { if (!e.sender.isDestroyed()) e.sender.send('ads:progress', { filePath, ...p }); };
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'marcuus-ads-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ryacha-ads-'));
   try {
     send({ stage: 'audio', pct: 0 });
     const wav = path.join(tmp, 'audio.wav');
@@ -725,7 +785,7 @@ ipcMain.handle('ads:prepare', async (e, filePath) => {
       onOutput: (chunk) => {
         const m = [...chunk.matchAll(/(\d+)%\|/g)].pop();
         if (m) send({ stage: 'transcribe', pct: +m[1] });
-        const step = [...chunk.matchAll(/\[marcuus[^\]]*\] ([^\n]+)/g)].pop();
+        const step = [...chunk.matchAll(/\[ryacha[^\]]*\] ([^\n]+)/g)].pop();
         if (step) send({ stage: 'transcribe', note: step[1] });
       },
     });
@@ -770,11 +830,11 @@ ipcMain.handle('ads:listMedia', (_e, folder) => {
 });
 
 // ---- updates: every published version is required ---------------------------------------
-// The version file lives in the public "marcuus-releases" repo (the code repo is private).
+// The version file lives in the public "ryacha-releases" repo.
 // No network / GitHub down → the app opens normally (transcription works offline).
 
-const UPDATE_URL = process.env.MARCUUS_UPDATE_URL || 'https://raw.githubusercontent.com/Masonnigg/marcuus-releases/main/latest.json';
-const RELEASES_PAGE = 'https://github.com/Masonnigg/marcuus-releases/releases/latest';
+const UPDATE_URL = process.env.RYACHA_UPDATE_URL || 'https://raw.githubusercontent.com/Masonnigg/ryacha-releases/main/latest.json';
+const RELEASES_PAGE = 'https://github.com/Masonnigg/ryacha-releases/releases/latest';
 
 const cmpVersion = (a, b) => {
   const pa = String(a).split('.').map(Number);
@@ -786,7 +846,7 @@ let pendingUpdate = null;
 const publicUpdate = (u) => ({ version: u.version, notes: u.notes || '', current: app.getVersion() });
 
 async function checkForUpdate() {
-  if (!app.isPackaged && !process.env.MARCUUS_UPDATE_URL) return null; // not while developing
+  if (!app.isPackaged && !process.env.RYACHA_UPDATE_URL) return null; // not while developing
   try {
     const r = await fetch(`${UPDATE_URL}?t=${Date.now()}`, { cache: 'no-store', signal: AbortSignal.timeout(8000) });
     if (!r.ok) return null;
@@ -840,15 +900,15 @@ ipcMain.handle('update:install', async (e) => {
   if (!u) throw new Error('Aucune mise à jour en attente.');
   const send = (p) => { if (!e.sender.isDestroyed()) e.sender.send('update:progress', p); };
   const asset = u.assets[process.arch];
-  const bundle = path.resolve(app.getPath('exe'), '..', '..', '..'); // …/MARCUUS.app
+  const bundle = path.resolve(app.getPath('exe'), '..', '..', '..'); // …/RYACHA.app
   if (!bundle.endsWith('.app')) throw new Error('Emplacement de l’app inattendu.');
-  if (bundle.includes('/AppTranslocation/')) throw new Error('Glisse MARCUUS dans le dossier Applications, relance-le, puis réessaie.');
+  if (bundle.includes('/AppTranslocation/')) throw new Error('Glisse RYACHA dans le dossier Applications, relance-le, puis réessaie.');
   try { fs.accessSync(path.dirname(bundle), fs.constants.W_OK); } catch { throw new Error(`Pas le droit de modifier ${path.dirname(bundle)}.`); }
 
   // 1. download with macOS's curl (Electron's fetch can crash on large streamed downloads).
   //    Files curl writes aren't quarantined, so there's no Gatekeeper prompt after the update.
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'marcuus-update-'));
-  const newApp = path.join(tmp, 'x', 'MARCUUS.app');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ryacha-update-'));
+  let newApp = path.join(tmp, 'x', path.basename(bundle)); // a light update rebuilds the app under its own name
   let light = false;
   if (asset.patch) {
     try {
@@ -859,7 +919,7 @@ ipcMain.handle('update:install', async (e) => {
     }
   }
   if (!light) {
-    const zip = path.join(tmp, 'MARCUUS.zip');
+    const zip = path.join(tmp, 'update.zip');
     try {
       await fetchVerified(asset, zip, send);
     } catch (err) {
@@ -867,6 +927,9 @@ ipcMain.handle('update:install', async (e) => {
     }
     send({ stage: 'unpack' });
     await updateTool('/usr/bin/ditto')(['-x', '-k', zip, path.join(tmp, 'x')]);
+    const inZip = listDir(path.join(tmp, 'x')).find((n) => n.endsWith('.app')); // the app in the archive, whatever its name
+    if (!inZip) throw new Error('Archive invalide.');
+    newApp = path.join(tmp, 'x', inZip);
   }
   // 2. verify the unpacked app's version
   const plist = path.join(newApp, 'Contents', 'Info.plist');
@@ -883,7 +946,7 @@ if mv "$OLD" "$OLD.old"; then
   if mv "$NEW" "$OLD"; then rm -rf "$OLD.old"; else mv "$OLD.old" "$OLD"; fi
 fi
 xattr -dr com.apple.quarantine "$OLD" 2>/dev/null
-${process.env.MARCUUS_USER_DATA ? `open --env MARCUUS_USER_DATA="${process.env.MARCUUS_USER_DATA}" "$OLD"` : 'open "$OLD"'}
+${TEST_DATA ? `open --env RYACHA_USER_DATA="${TEST_DATA}" "$OLD"` : 'open "$OLD"'}
 rm -rf "${tmp}"
 `);
   send({ stage: 'restart' });

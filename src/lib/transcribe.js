@@ -17,7 +17,7 @@ export async function srtTarget(job, exists, taken = new Set()) {
   const base = job.path.replace(/\.[^./]+$/, '');
   if (!taken.has(`${base}.srt`) && !(await exists(`${base}.srt`))) return `${base}.srt`;
   for (let n = 1; ; n++) {
-    const p = `${base} - MARCUUS${n > 1 ? ` ${n}` : ''}.srt`;
+    const p = `${base} - RYACHA${n > 1 ? ` ${n}` : ''}.srt`;
     if (!taken.has(p)) return p;
   }
 }

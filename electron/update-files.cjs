@@ -1,4 +1,4 @@
-// Updates without the 160 MB download. Between two builds only MARCUUS's own code and the small launchers change
+// Updates without the 160 MB download. Between two builds only RYACHA's own code and the small launchers change
 // (1.5 MB out of 410 MB): a light update ships exactly those files, so the result is byte-identical to the full
 // build, signature included. Electron, ffmpeg and uv only come down when they really change.
 // Used by the app (electron/main.cjs) and by the release (scripts/release.mjs).
@@ -11,7 +11,7 @@ const CHUNK = 4 * 1024 * 1024;
 const CONNECTIONS = 8; // GitHub's release files can crawl on one connection (~30 KB/s) and add up on several
 const ATTEMPTS = 6;
 
-/** The parts of the bundle that differ from one build to the next (paths relative to MARCUUS.app). */
+/** The parts of the bundle that differ from one build to the next (paths relative to RYACHA.app). */
 function patchRoots(app) {
   const helpers = fs.readdirSync(path.join(app, 'Contents', 'Frameworks'))
     .filter((n) => / Helper( \(.+\))?\.app$/.test(n))

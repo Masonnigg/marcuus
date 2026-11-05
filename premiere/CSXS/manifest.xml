@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<ExtensionManifest xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Version="7.0" ExtensionBundleId="com.reda.marcuus.pubs" ExtensionBundleVersion="1.0.0" ExtensionBundleName="RYACHA">
+<ExtensionManifest xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Version="7.0" ExtensionBundleId="com.reda.ryacha.pubs" ExtensionBundleVersion="1.0.0" ExtensionBundleName="RYACHA">
   <ExtensionList>
-    <Extension Id="com.reda.marcuus.pubs.panel" Version="1.0.0" />
+    <Extension Id="com.reda.ryacha.pubs.panel" Version="1.0.0" />
   </ExtensionList>
   <ExecutionEnvironment>
     <HostList>
@@ -15,7 +15,7 @@
     </RequiredRuntimeList>
   </ExecutionEnvironment>
   <DispatchInfoList>
-    <Extension Id="com.reda.marcuus.pubs.panel">
+    <Extension Id="com.reda.ryacha.pubs.panel">
       <DispatchInfo>
         <Resources>
           <MainPath>./index.html</MainPath>

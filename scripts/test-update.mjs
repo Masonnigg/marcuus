@@ -16,20 +16,20 @@ let fail = 0;
 const check = (name, ok, detail = '') => { if (!ok) fail++; console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${ok ? '' : ' → ' + detail}`); };
 const dir = mkdtempSync(join(tmpdir(), 'update-test-'));
 
-// ---- a small fake MARCUUS.app
+// ---- a small fake RYACHA.app
 const put = (root, rel, content) => { mkdirSync(dirname(join(root, rel)), { recursive: true }); writeFileSync(join(root, rel), content); };
 function makeApp(name, version, { framework = 'electron-1', asar = `code ${version}` } = {}) {
-  const app = join(dir, name, 'MARCUUS.app');
+  const app = join(dir, name, 'RYACHA.app');
   put(app, 'Contents/Info.plist', `plist ${version}`);
-  put(app, 'Contents/MacOS/MARCUUS', `exe ${version}`);
+  put(app, 'Contents/MacOS/RYACHA', `exe ${version}`);
   put(app, 'Contents/_CodeSignature/CodeResources', `seal ${version}`);
   put(app, 'Contents/Resources/app.asar', asar);
   put(app, `Contents/Resources/app.asar.unpacked/electron/engine/${version}.py`, 'print()');
   put(app, 'Contents/Resources/bin/ffmpeg', 'ffmpeg');
   put(app, 'Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework', framework);
   symlinkSync('Versions/A/Electron Framework', join(app, 'Contents/Frameworks/Electron Framework.framework/Electron Framework'));
-  put(app, 'Contents/Frameworks/MARCUUS Helper.app/Contents/Info.plist', `helper ${version}`);
-  put(app, 'Contents/Frameworks/MARCUUS Helper (GPU).app/Contents/MacOS/MARCUUS Helper (GPU)', `gpu ${version}`);
+  put(app, 'Contents/Frameworks/RYACHA Helper.app/Contents/Info.plist', `helper ${version}`);
+  put(app, 'Contents/Frameworks/RYACHA Helper (GPU).app/Contents/MacOS/RYACHA Helper (GPU)', `gpu ${version}`);
   return app;
 }
 const dittoMerge = (src, dest) => run('/usr/bin/ditto', [src, dest]);
@@ -38,7 +38,7 @@ const oldApp = makeApp('old', '1.0.10');
 const newApp = makeApp('new', '1.0.11');
 check('the files that change between builds are in the patch, Electron and tools are not', (() => {
   const r = patchRoots(oldApp);
-  return r.includes('Contents/Resources/app.asar') && r.includes('Contents/MacOS') && r.includes('Contents/Frameworks/MARCUUS Helper (GPU).app')
+  return r.includes('Contents/Resources/app.asar') && r.includes('Contents/MacOS') && r.includes('Contents/Frameworks/RYACHA Helper (GPU).app')
     && !r.some((x) => x.includes('Electron Framework') || x.includes('/bin'));
 })(), patchRoots(oldApp).join(' | '));
 check('two builds with the same Electron and tools have the same base', await frozenDigest(oldApp) === await frozenDigest(newApp));
@@ -48,7 +48,7 @@ check('another Electron → another base (the full app is needed)', await frozen
 
 const stage = join(dir, 'stage');
 for (const r of patchRoots(newApp)) { mkdirSync(dirname(join(stage, r)), { recursive: true }); await run('/usr/bin/ditto', [join(newApp, r), join(stage, r)]); }
-const result = join(dir, 'result', 'MARCUUS.app');
+const result = join(dir, 'result', 'RYACHA.app');
 await applyPatch(oldApp, stage, result, dittoMerge);
 check('old app + patch = byte-identical to the new build', await fullDigest(result) === await fullDigest(newApp));
 check('files gone from the new version are gone', !existsSync(join(result, 'Contents/Resources/app.asar.unpacked/electron/engine/1.0.10.py')) && existsSync(join(result, 'Contents/Resources/app.asar.unpacked/electron/engine/1.0.11.py')));
@@ -70,7 +70,7 @@ const server = createServer((req, res) => {
   setTimeout(() => { res.writeHead(206, { 'Content-Range': `bytes ${from}-${to}/${file.length}`, 'Content-Length': to - from + 1 }); res.end(file.subarray(from, to + 1)); }, 30);
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
-const url = `http://127.0.0.1:${server.address().port}/MARCUUS.zip`;
+const url = `http://127.0.0.1:${server.address().port}/RYACHA.zip`;
 const curl = (args) => run('/usr/bin/curl', args, { maxBuffer: 1 << 20 });
 const seen = [];
 const dest = join(dir, 'a.zip');
