@@ -50,6 +50,23 @@ def audio_seconds(path):
         return w.getnframes() / w.getframerate()
 
 
+def wav_samples(path):
+    """The 16 kHz mono 16-bit wav the app and the Premiere panel make → the samples Whisper wants, read here:
+    given a path, Whisper would run `ffmpeg` from PATH, which a Mac without Homebrew doesn't have. Same numbers
+    as Whisper's own ffmpeg read. Anything else → None (Whisper reads the file itself)."""
+    import wave
+
+    import numpy as np
+
+    try:
+        with wave.open(path) as w:
+            if w.getframerate() != 16000 or w.getnchannels() != 1 or w.getsampwidth() != 2:
+                return None
+            return np.frombuffer(w.readframes(w.getnframes()), np.int16).flatten().astype(np.float32) / 32768.0
+    except Exception:
+        return None
+
+
 def drop_ghost_tail(segments, duration):
     """Whisper works in 30 s windows. When one ends a fraction of a second before the audio does, it
     decodes that scrap on its own and, with nothing left to hear, invents words ("Bonne soirée...",
@@ -96,8 +113,9 @@ def main():
     import mlx_whisper
 
     log("transcription")
+    samples = wav_samples(audio)
     result = mlx_whisper.transcribe(
-        audio,
+        audio if samples is None else samples,
         path_or_hf_repo=path,
         language=None if language == "auto" else language,
         initial_prompt=prompt or None,

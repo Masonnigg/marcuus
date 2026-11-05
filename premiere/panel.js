@@ -451,7 +451,7 @@
         await run(tools.ffmpeg, ['-nostdin', '-y', '-i', `${base}.mp3`, '-vn', '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', wav]);
         at(0.25, 'transcription 0 %');
         const out = await run(tools.python, [tools.engine, wav, opts.language || 'fr', prompt], {
-          env: { NUMBA_CACHE_DIR: path.join(APP_DATA, 'engine', 'numba-cache'), UV_PYTHON_PREFERENCE: 'only-managed', HF_HUB_DISABLE_TELEMETRY: '1', PATH: `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${process.env.PATH || ''}` },
+          env: { NUMBA_CACHE_DIR: path.join(APP_DATA, 'engine', 'numba-cache'), UV_PYTHON_PREFERENCE: 'only-managed', HF_HUB_DISABLE_TELEMETRY: '1', PATH: `${path.dirname(tools.ffmpeg)}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${process.env.PATH || ''}` }, // the ffmpeg found here (the app's own on a Mac without Homebrew) first
           onLine: (line) => { const m = line.match(/(\d+)%\|/); if (m) at(0.25 + (0.65 * +m[1]) / 100, `transcription ${m[1]} %`); },
         });
         fs.rmSync(wav, { force: true });
