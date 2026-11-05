@@ -23,6 +23,14 @@ bundle in place. The data folder keeps its first name too (`~/Library/Applicatio
 
 Electron + React (Vite) + Tailwind. UI in French.
 
+## Error reports
+
+When something fails on a Mac (in the app or in the Premiere panel), the error goes to the project's Sentry, cleaned
+by `electron/report.cjs`: the message and where it happened, the app and macOS versions, and an anonymous id per
+installation. File paths, file names, quoted words, scripts and transcripts are taken out before anything is sent
+(`scripts/test-report.mjs`). Réglages › Rapports d’erreur turns it off. No Sentry SDK: it would add about 70 MB to
+every light update.
+
 ## Develop
 
 ```bash

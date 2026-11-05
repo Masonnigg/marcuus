@@ -42,6 +42,7 @@ const mock = {
     readBrief: async () => { throw new Error('Disponible uniquement dans l’app RYACHA.'); },
     onProgress: () => () => {},
   },
+  report: async () => false,
   premiere: {
     status: async () => ({ installed: false, linked: false, available: false }),
     install: async () => ({ ok: false, error: 'Disponible uniquement dans l’app RYACHA.' }),

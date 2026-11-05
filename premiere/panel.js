@@ -57,6 +57,20 @@
   // Progress reads like Premiere's render bar: one segment per sequence or part. progress() lights the item being
   // worked on, log() stamps its outcome on it (done, skipped, failed); the lines themselves fold under "Détail".
   let segs = [], cur = -1, lines = 0;
+  // Errors are written next to the job; the app sends them on (Réglages › Rapports d'erreur), cleaned of names.
+  const ERRORS = path.join(DATA, 'panel-errors.jsonl');
+  const PANEL_VERSION = (() => { try { return fs.readFileSync(path.join(HERE, '.ryacha-version'), 'utf8').trim(); } catch (e) { return 'dev'; } })();
+  const STEP_NAMES = ['import', 'sous-titres', 'zooms', 'export'];
+  function reportError(message, stack, level = 'error') {
+    try {
+      fs.mkdirSync(DATA, { recursive: true });
+      const step = typeof openStep === 'number' ? STEP_NAMES[openStep] || String(openStep) : '?';
+      fs.appendFileSync(ERRORS, `${JSON.stringify({ t: Date.now(), step, level, message: String(message).slice(0, 600), stack: stack || undefined, version: PANEL_VERSION })}\n`);
+    } catch (e) {}
+  }
+  window.addEventListener('error', (e) => reportError(e.message, e.error && e.error.stack));
+  window.addEventListener('unhandledrejection', (e) => reportError((e.reason && e.reason.message) || String(e.reason), e.reason && e.reason.stack));
+
   function bars(n) {
     const r = $('render');
     r.innerHTML = '';
@@ -71,6 +85,8 @@
     if (text !== undefined) $('status').textContent = text;
   };
   const log = (text, cls = '') => {
+    // failures and warnings go to the app's error reports, without the file or part name before " : "
+    if (cls === 'err' || cls === 'warn') reportError(text.includes(' : ') ? text.slice(text.indexOf(' : ') + 3) : text, null, cls === 'warn' ? 'warning' : 'error');
     const d = document.createElement('div');
     d.className = cls;
     d.textContent = text;
@@ -364,6 +380,7 @@
       progress(1, `${summary} · ${Math.round((Date.now() - t0) / 1000)} s`);
     } catch (e) {
       failed = true;
+      reportError(e.message, e.stack);
       $('status').textContent = `Erreur : ${e.message}`;
       $('status').className = 'status err';
     } finally {

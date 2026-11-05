@@ -36,6 +36,8 @@ export default function App() {
 
 function Main() {
   const [page, setPage] = useState('palettes');
+  const pageRef = useRef(page);
+  pageRef.current = page;
   const [toast, setToast] = useState(null);
   const [brollInput, setBrollInput] = useState(null); // { name, path, cues }
   const [fixerInput, setFixerInput] = useState(null); // { name, path, raw }
@@ -43,6 +45,7 @@ function Main() {
   const timer = useRef();
 
   const notify = useCallback((msg, opts = {}) => {
+    if (opts.tone === 'bad') kit.report({ where: `écran:${pageRef.current}`, message: String(msg), level: 'warning' }).catch(() => {});
     clearTimeout(timer.current);
     setToast({ msg, swatch: opts.swatch, tone: opts.tone, action: opts.action, key: Date.now() });
     timer.current = setTimeout(() => setToast(null), opts.ms || 1600);

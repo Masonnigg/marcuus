@@ -4,6 +4,7 @@ const call = (ch) => (...args) => ipcRenderer.invoke(ch, ...args);
 
 contextBridge.exposeInMainWorld('kit', {
   store: { get: call('store:get'), set: call('store:set') },
+  report: call('report:send'),
   copy: call('clipboard:write'),
   open: call('shell:open'),
   reveal: call('shell:reveal'),

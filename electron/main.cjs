@@ -24,6 +24,51 @@ function writeStore(key, value) {
 }
 const settings = () => readStore('settings', {}) || {};
 
+// ---- error reports (electron/report.cjs): what fails on users' Macs reaches Sentry, cleaned of anything personal ----
+const reporter = require('./report.cjs').createReporter({
+  version: app.getVersion(),
+  dataDir,
+  enabled: () => settings().errorReports !== false,
+  fetch: (...args) => require('electron').net.fetch(...args),
+  system: { macos: process.getSystemVersion(), electron: process.versions.electron, arch: process.arch, packaged: app.isPackaged },
+});
+process.on('uncaughtException', (err) => { console.error(err); reporter.error(err, 'app'); });
+process.on('unhandledRejection', (err) => { console.error(err); reporter.error(err, 'app'); });
+// every failure behind a button passes here: it is reported, then the screen shows it as before
+const handleIpc = ipcMain.handle.bind(ipcMain);
+ipcMain.handle = (channel, fn) => handleIpc(channel, async (...args) => {
+  try { return await fn(...args); } catch (err) {
+    // an AI call's error can quote the model's answer (script text): only its first line goes in the report
+    const sent = /:ask$/.test(channel) ? Object.assign(new Error(String(err?.message ?? err).split('\n')[0].slice(0, 150)), { stack: err?.stack ? String(err.stack).split('\n').filter((l) => /^\s+at /.test(l)).join('\n') : undefined }) : err;
+    reporter.error(sent, channel);
+    throw err;
+  }
+});
+handleIpc('report:send', (_e, r) => {
+  if (!r || typeof r !== 'object') return false;
+  if (r.stack) return reporter.error(Object.assign(new Error(String(r.message)), { name: String(r.name || 'Error'), stack: String(r.stack) }), String(r.where || 'écran'), r.tags || {});
+  return reporter.message(String(r.message), String(r.where || 'écran'), r.tags || {}, r.level === 'error' ? 'error' : 'warning');
+});
+app.on('render-process-gone', (_e, _wc, d) => { if (d.reason !== 'clean-exit') reporter.message(`Écran fermé : ${d.reason} (code ${d.exitCode})`, 'écran', {}, 'error'); });
+app.on('child-process-gone', (_e, d) => { if (!['clean-exit', 'killed'].includes(d.reason)) reporter.message(`Processus ${d.type} arrêté : ${d.reason} (code ${d.exitCode})`, 'app', {}, 'error'); });
+// The Premiere panel writes its errors next to the job; the app sends them (it has the setting and the network).
+const PANEL_ERRORS = process.env.MARCUUS_PANEL_ERRORS || path.join(os.homedir(), 'Library', 'Application Support', 'Edit Kit', 'pubs', 'panel-errors.jsonl');
+function sendPanelErrors() {
+  const taken = `${PANEL_ERRORS}.sending`;
+  try { fs.renameSync(PANEL_ERRORS, taken); } catch { return; }
+  let lines = [];
+  try { lines = fs.readFileSync(taken, 'utf8').split('\n').filter(Boolean); } catch {}
+  fs.rmSync(taken, { force: true });
+  for (const line of lines.slice(-30)) {
+    let r;
+    try { r = JSON.parse(line); } catch { continue; }
+    const where = `panneau:${r.step || '?'}`, tags = { panneau: String(r.version || '?') };
+    if (r.stack) reporter.error(Object.assign(new Error(String(r.message)), { stack: String(r.stack) }), where, tags);
+    else reporter.message(String(r.message), where, tags, r.level === 'warning' ? 'warning' : 'error');
+  }
+}
+app.whenReady().then(() => { sendPanelErrors(); setInterval(sendPanelErrors, 60_000); });
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1320,

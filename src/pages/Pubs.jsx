@@ -94,6 +94,7 @@ export default function Pubs({ active }) {
       setPhase('review'); setRun(null); setSel(null);
     } catch (e) {
       setPhase('setup'); setRun({ error: cleanErr(e) });
+      kit.report({ where: 'pubs:analyse', message: cleanErr(e), stack: e?.stack, name: e?.name }).catch(() => {});
     }
   }
 

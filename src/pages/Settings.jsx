@@ -183,6 +183,15 @@ export default function Settings() {
             />
           </section>
 
+          <section className="card rise p-5" style={{ animationDelay: '70ms' }}>
+            <h2 className="mb-1 text-[14px] font-semibold">Rapports d’erreur</h2>
+            <p className="mb-3 text-mute">Quand quelque chose plante, dans l’app ou dans le panneau Premiere, RYACHA envoie l’erreur au développeur pour qu’il la corrige : le message, l’endroit, les versions de l’app et de macOS. Jamais tes fichiers, leurs noms, tes scripts ni tes textes.</p>
+            <label className="flex cursor-pointer items-center gap-2.5">
+              <input type="checkbox" checked={s.errorReports !== false} onChange={(e) => save({ errorReports: e.target.checked })} />
+              Envoyer les rapports d’erreur
+            </label>
+          </section>
+
           <section className="card rise p-5" style={{ animationDelay: '80ms' }}>
             <h2 className="mb-1 text-[14px] font-semibold">Téléchargements</h2>
             <p className="mb-3 text-mute">Les B-roll sont rangés dans un sous-dossier au nom de la vidéo.</p>
