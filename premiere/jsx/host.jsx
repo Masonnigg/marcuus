@@ -199,6 +199,32 @@ function pubs_renderAudio(index, out, preset) {
   } catch (e) { return pubsFail(e); }
 }
 
+// A part's sound as the clips it is made of (file, where in it, where on the timeline), read in an instant: the
+// panel makes the audio with ffmpeg, so Premiere never renders it (its render blocks Premiere, and the panel with it).
+// plain = false when ffmpeg can't copy the sound exactly (a nested sequence, a speed change): then pubs_renderAudio.
+function pubs_audioCut(index) {
+  try {
+    var s = pubsJob.sequences[index];
+    var seq = pubsJobSequence(s);
+    if (!seq) return pubsFail('Séquence introuvable : ' + s.name);
+    var clips = [], why = '';
+    for (var t = 0; t < seq.audioTracks.numTracks; t++) {
+      var track = seq.audioTracks[t];
+      if (track.isMuted && track.isMuted()) continue;
+      for (var c = 0; c < track.clips.numItems; c++) {
+        var clip = track.clips[c];
+        if (clip.disabled) continue;
+        var item = clip.projectItem;
+        var media = item && item.getMediaPath ? item.getMediaPath() : '';
+        if (!media || (item.isSequence && item.isSequence())) why = why || 'séquence imbriquée';
+        else if (Math.abs((clip.getSpeed ? clip.getSpeed() : 1) - 1) > 0.001 || (clip.isSpeedReversed && clip.isSpeedReversed())) why = why || 'vitesse modifiée';
+        clips.push({ media: media, track: t, start: clip.start.seconds, end: clip.end.seconds, inPoint: clip.inPoint.seconds });
+      }
+    }
+    return pubsJson({ ok: true, plain: !why, why: why, clips: clips, end: parseFloat(seq.end) / PUBS_TICKS });
+  } catch (e) { return pubsFail(e); }
+}
+
 // The SRT RYACHA made from that audio, as a new caption track of the part (it shows in every ad nesting it).
 function pubs_addCaptions(index, file) {
   try {

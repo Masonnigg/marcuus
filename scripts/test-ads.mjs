@@ -1,5 +1,10 @@
 // Pubs cutting rules. Made-up sentences only: never client material.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import pubsLib from '../premiere/lib/pubs.cjs';
 import panelCaptions from '../premiere/lib/captions.cjs';
 import { trimPhrase, recordingFrom, matchParts } from '../src/lib/ads/takes.js';
@@ -367,6 +372,37 @@ test('panel captions: the Transcrire rules, bundled for Premiere', () => {
   const srt = panelCaptions.srtFromEngine({ words: [{ text: ' C', start: 0, end: 200 }, { text: "'est", start: 200, end: 400 }, { text: ' parti.', start: 400, end: 900 }] }, { wordsPerCue: 2, maxChars: 18 });
   assert.ok(srt.includes("C'est parti."), srt);
   assert.equal(panelCaptions.srtFromEngine({ words: [] }), '');
+});
+
+test('panel captions: the part’s sound made by ffmpeg from its clips, each at its place, Premiere left free', () => {
+  const ffmpeg = createRequire(import.meta.url)('ffmpeg-static');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ryacha-cut-'));
+  const tone = (name, hz) => { const f = path.join(dir, name); execFileSync(ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', `sine=frequency=${hz}:duration=4:sample_rate=48000`, '-ac', '2', f]); return f; };
+  const a = tone('a.wav', 300), b = tone('b.wav', 1200);
+  // A from 1.0 s placed at 0, a gap, B from 0.5 s placed at 1.5; B also on a second track (dual mono)
+  const cut = { end: 3, clips: [
+    { media: a, track: 0, start: 0, end: 1, inPoint: 1 },
+    { media: b, track: 0, start: 1.5, end: 2.5, inPoint: 0.5 },
+    { media: b, track: 1, start: 1.5, end: 2.5, inPoint: 0.5 },
+  ] };
+  const out = path.join(dir, 'part.wav');
+  execFileSync(ffmpeg, pubsLib.audioCutArgs(cut, out));
+  const wav = fs.readFileSync(out);
+  const pcm = wav.subarray(wav.indexOf('data') + 8); // 16 kHz mono s16
+  const s = (i) => pcm.readInt16LE(i * 2);
+  const at = (from, to) => { // zero crossings per second and peak level, in a window of the result
+    let z = 0, peak = 0;
+    for (let i = from * 16000 + 1; i < to * 16000; i++) { if ((s(i - 1) < 0) !== (s(i) < 0)) z++; peak = Math.max(peak, Math.abs(s(i))); }
+    return { hz: Math.round(z / 2 / (to - from)), peak };
+  };
+  assert.equal(pcm.length / 2, 3 * 16000); // the part's length
+  assert.ok(Math.abs(at(0.1, 0.9).hz - 300) < 10);
+  assert.equal(at(1.1, 1.4).peak, 0); // the gap stays silent
+  assert.ok(Math.abs(at(1.6, 2.4).hz - 1200) < 15);
+  assert.ok(Math.abs(at(1.6, 2.4).peak - at(0.1, 0.9).peak) < 300); // the same sound on two tracks: not louder
+  assert.equal(at(2.6, 2.9).peak, 0);
+  assert.equal(pubsLib.audioCutArgs({ clips: [] }, out), null);
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test('panel zooms: one per shot on V1, light then full like zoomi, up to the nested corps', () => {

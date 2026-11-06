@@ -350,4 +350,30 @@ function styleCaptionTracks(xml, styleXml, names, learned) {
   return { xml: out, tracks: tracks.length, captions };
 }
 
-module.exports = { LAYER, STRENGTH, layerName, resizeTemplate, zoomsFor, frameFilter, cutsAndLayer, exportPlan, styleCaptionTracks, learnStyle, styleFromFile, styleName, decodeLog, ameRecords, styleFromProject, readStyleFile, textStart };
+/**
+ * A part's sound for the transcription, made by ffmpeg from the clips Premiere reads (host pubs_audioCut): each clip
+ * cut from its file and put back at its place on the timeline, the tracks mixed, 16 kHz mono WAV.
+ * cut = { clips: [{ media, track, start, end, inPoint }], end } (seconds) → ffmpeg's arguments, or null with no clip.
+ */
+function audioCutArgs(cut, out) {
+  const n = (x) => (Math.round(x * 1000) / 1000).toFixed(3);
+  // the same stretch of the same file on two tracks (a camera's dual mono) is taken once: not twice as loud
+  const seen = new Set();
+  const clips = (cut.clips || []).filter((c) => {
+    const key = [c.media, n(c.start), n(c.end), n(c.inPoint)].join('|');
+    if (!c.media || c.end - c.start <= 0.001 || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (!clips.length) return null;
+  const args = ['-nostdin', '-y', '-v', 'error'];
+  clips.forEach((c) => args.push('-ss', n(Math.max(0, c.inPoint)), '-t', n(c.end - c.start), '-i', c.media));
+  const chains = clips.map((c, k) => `[${k}:a]aformat=sample_rates=16000:channel_layouts=mono,adelay=${Math.round(Math.max(0, c.start) * 1000)}:all=1[a${k}]`);
+  const mix = `${clips.map((_, k) => `[a${k}]`).join('')}amix=inputs=${clips.length}:duration=longest:normalize=0,apad[mix]`; // silence up to the part's end
+  args.push('-filter_complex', [...chains, mix].join(';'), '-map', '[mix]');
+  const end = Math.max(...clips.map((c) => c.end), cut.end || 0);
+  args.push('-t', n(end), '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', out);
+  return args;
+}
+
+module.exports = { LAYER, STRENGTH, layerName, resizeTemplate, zoomsFor, frameFilter, cutsAndLayer, exportPlan, styleCaptionTracks, learnStyle, styleFromFile, styleName, decodeLog, ameRecords, styleFromProject, readStyleFile, textStart, audioCutArgs };

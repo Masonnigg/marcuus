@@ -473,12 +473,24 @@
       if (info.sequences[p.index].missing) { failed++; log(`✗ ${p.name} : pas dans le projet (étape 1)`, 'err'); continue; }
       const base = path.join(dir, p.name.replace(/[/:]/g, '-'));
       try {
-        at(0.02, 'rendu du son…');
-        const r = await host('pubs_renderAudio', p.index, `${base}.mp3`, tools.mp3);
-        if (r.error) throw new Error(r.error);
-        at(0.2, 'préparation du son…');
         const wav = `${base}.wav`;
-        await run(tools.ffmpeg, ['-nostdin', '-y', '-i', `${base}.mp3`, '-vn', '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', wav]);
+        // the sound, made here by ffmpeg from the part's clips: Premiere stays free (its own render blocks it and
+        // leaves this panel empty while it lasts); Premiere renders it only when ffmpeg can't copy it exactly
+        at(0.02, 'lecture de la coupe…');
+        const cut = await host('pubs_audioCut', p.index);
+        const args = !cut.error && cut.plain ? lib.audioCutArgs(cut, wav) : null;
+        let ready = false;
+        if (args) {
+          at(0.05, 'préparation du son…');
+          try { await run(tools.ffmpeg, args); ready = true; } catch (e) { journal(`${p.name} : son par ffmpeg impossible (${e.message}), rendu par Premiere`); }
+        } else journal(`${p.name} : rendu par Premiere (${cut.error || cut.why || 'aucun clip son'})`);
+        if (!ready) {
+          at(0.05, 'rendu du son par Premiere…');
+          const r = await host('pubs_renderAudio', p.index, `${base}.mp3`, tools.mp3);
+          if (r.error) throw new Error(r.error);
+          at(0.2, 'préparation du son…');
+          await run(tools.ffmpeg, ['-nostdin', '-y', '-i', `${base}.mp3`, '-vn', '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', wav]);
+        }
         at(0.25, 'transcription 0 %');
         const out = await run(tools.python, [tools.engine, wav, opts.language || 'fr', prompt], {
           env: { NUMBA_CACHE_DIR: path.join(APP_DATA, 'engine', 'numba-cache'), UV_PYTHON_PREFERENCE: 'only-managed', HF_HUB_DISABLE_TELEMETRY: '1', PATH: `${path.dirname(tools.ffmpeg)}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${process.env.PATH || ''}` }, // the ffmpeg found here (the app's own on a Mac without Homebrew) first
