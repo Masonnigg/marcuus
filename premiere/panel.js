@@ -103,7 +103,8 @@
   const first = (list) => list.find((p) => { try { return fs.existsSync(p); } catch (e) { return false; } }) || null;
   // the app's tools: where RYACHA says it is (it writes it at each start), else where it is installed by default
   const RESOURCES = [(() => { try { return JSON.parse(fs.readFileSync(path.join(DATA, 'app.json'), 'utf8')).resources; } catch (e) { return null; } })(), '/Applications/RYACHA.app/Contents/Resources'].filter(Boolean);
-  const ffmpeg = () => first(['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', ...RESOURCES.map((r) => `${r}/bin/ffmpeg`), path.join(REPO, 'vendor', process.arch, 'bin', 'ffmpeg')]);
+  // the ffmpeg inside RYACHA first (the same on every Mac), Homebrew's only as a last resort
+  const ffmpeg = () => first([...RESOURCES.map((r) => `${r}/bin/ffmpeg`), path.join(REPO, 'vendor', process.arch, 'bin', 'ffmpeg'), '/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg']);
   const python = () => first([path.join(APP_DATA, 'engine', '.venv', 'bin', 'python')]);
   const engine = () => first([path.join(REPO, 'electron', 'engine', 'transcribe_mlx.py'), ...RESOURCES.map((r) => `${r}/app.asar.unpacked/electron/engine/transcribe_mlx.py`)]);
   function premierePreset(rel) {
@@ -423,7 +424,7 @@
     const todo = partsOf().filter((p) => !unticked.has(p.name));
     if (!todo.length) throw new Error('Coche au moins une partie.');
     const tools = { ffmpeg: ffmpeg(), python: python(), engine: engine(), mp3: premierePreset('3F3F3F3F_4D503320/MP3 256kbps High Quality.epr') };
-    if (!tools.ffmpeg) throw new Error('ffmpeg introuvable (brew install ffmpeg).');
+    if (!tools.ffmpeg) throw new Error('ffmpeg introuvable : ouvre RYACHA une fois (l’app donne ses outils au panneau).');
     if (!tools.python || !tools.engine) throw new Error('Moteur de transcription pas installé : ouvre RYACHA › Transcrire une fois.');
     if (!tools.mp3) throw new Error('Préréglage MP3 de Premiere introuvable.');
     const opts = transcribeOptions();
@@ -642,7 +643,7 @@
       const info = await host('pubs_playhead', Math.max(...zoomTracks()));
       if (info.error) throw new Error(info.error);
       const tool = ffmpeg();
-      if (!tool) throw new Error('ffmpeg introuvable (brew install ffmpeg).');
+      if (!tool) throw new Error('ffmpeg introuvable : ouvre RYACHA une fois (l’app donne ses outils au panneau).');
       const out = path.join(DATA, 'frames', 'playhead.jpg');
       fs.mkdirSync(path.dirname(out), { recursive: true });
       await run(tool, ['-nostdin', '-v', 'error', '-y', '-ss', String(info.time), '-i', info.path, '-filter_complex', lib.frameFilter(info, info.width, info.height), '-frames:v', '1', '-q:v', '3', out]);

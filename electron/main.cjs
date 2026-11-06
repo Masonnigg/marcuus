@@ -443,11 +443,15 @@ ipcMain.handle('chatgpt:cancel', () => chatgptAbort?.abort());
 const BUNDLED_BIN = app.isPackaged ? path.join(process.resourcesPath, 'bin') : path.join(__dirname, '..', 'vendor', process.arch, 'bin');
 const BIN_DIRS = [BUNDLED_BIN, '/opt/homebrew/bin', '/usr/local/bin'];
 const findBin = (name) => BIN_DIRS.map((d) => path.join(d, name)).find((p) => fs.existsSync(p)) || null;
-// MLX needs Apple Silicon running natively (not an Intel Mac, not Rosetta)
-const SUPPORTS_MLX = process.platform === 'darwin' && process.arch === 'arm64';
+// MLX needs Apple Silicon running natively (not an Intel Mac, not Rosetta), and the engine's pinned builds
+// (engine/requirements.txt: MLX, torch) need macOS 14 Sonoma or newer (Darwin 23)
+const MLX_CHIP = process.platform === 'darwin' && process.arch === 'arm64';
+const MLX_MACOS = parseInt(os.release(), 10) >= 23;
+const SUPPORTS_MLX = MLX_CHIP && MLX_MACOS;
 const engineDir = () => path.join(dataDir(), 'engine');
 const enginePy = () => path.join(engineDir(), '.venv', 'bin', 'python');
 const engineScript = () => path.join(__dirname, 'engine', 'transcribe_mlx.py').replace('app.asar', 'app.asar.unpacked');
+const engineRequirements = () => path.join(__dirname, 'engine', 'requirements.txt').replace('app.asar', 'app.asar.unpacked');
 const MODEL_REPO = 'mlx-community/whisper-large-v3-turbo';
 const modelReady = () => {
   const snaps = path.join(os.homedir(), '.cache', 'huggingface', 'hub', `models--${MODEL_REPO.replace('/', '--')}`, 'snapshots');
@@ -511,7 +515,7 @@ ipcMain.handle('whisper:cancel', () => { for (const p of activeProcs) p.kill('SI
 // ffmpeg's banner for a file (size, fps, audio): `ffmpeg -i` with no output prints it and exits 1
 const ffmpegBanner = (filePath) => new Promise((resolve, reject) => {
   const ffmpeg = findBin('ffmpeg');
-  if (!ffmpeg) return reject(new Error('ffmpeg manquant. Dans le Terminal : brew install ffmpeg'));
+  if (!ffmpeg) return reject(new Error('Outil manquant dans RYACHA (ffmpeg) : réinstalle l’app.'));
   const p = spawn(ffmpeg, ['-hide_banner', '-nostdin', '-i', filePath]);
   let err = '';
   p.stderr.on('data', (d) => { err += d; });
@@ -573,6 +577,7 @@ ipcMain.handle('fourfive:cancel', () => { fourfiveStop = true; fourfiveProc?.kil
 
 ipcMain.handle('whisper:status', () => ({
   supported: SUPPORTS_MLX,
+  unsupported: !MLX_CHIP ? 'chip' : !MLX_MACOS ? 'macos' : null,
   bundled: fs.existsSync(path.join(BUNDLED_BIN, 'uv')) && fs.existsSync(path.join(BUNDLED_BIN, 'ffmpeg')),
   uv: !!findBin('uv'),
   ffmpeg: !!findBin('ffmpeg'),
@@ -586,14 +591,16 @@ ipcMain.handle('whisper:install', (e) => {
   if (installing) return installing;
   const send = (p) => { if (!e.sender.isDestroyed()) e.sender.send('whisper:installProgress', p); };
   installing = (async () => {
-    if (!SUPPORTS_MLX) throw new Error('La transcription nécessite un Mac avec puce Apple (M1 ou plus récent).');
+    if (!MLX_CHIP) throw new Error('La transcription nécessite un Mac avec puce Apple (M1 ou plus récent).');
+    if (!MLX_MACOS) throw new Error('La transcription nécessite macOS 14 (Sonoma) ou plus récent.');
     const uv = findBin('uv');
-    if (!uv) throw new Error('uv manquant. Dans le Terminal : brew install uv ffmpeg');
+    if (!uv) throw new Error('Outil manquant dans RYACHA (uv) : réinstalle l’app.');
     if (!(fs.existsSync(enginePy()) && fs.existsSync(path.join(engineDir(), 'ok')))) {
       send({ stage: 'engine' });
       fs.mkdirSync(engineDir(), { recursive: true });
-      await runProc(uv, ['venv', '--allow-existing', '-p', '3.12', path.join(engineDir(), '.venv')]);
-      await runProc(uv, ['pip', 'install', '-p', enginePy(), 'mlx-whisper']);
+      // exact versions (engine/requirements.txt), the ones RYACHA was tested with: never "whatever is newest"
+      await runProc(uv, ['venv', '--allow-existing', '-p', '3.12.15', path.join(engineDir(), '.venv')]);
+      await runProc(uv, ['pip', 'install', '-p', enginePy(), '-r', engineRequirements()]);
       fs.writeFileSync(path.join(engineDir(), 'ok'), new Date().toISOString());
     }
     if (!modelReady()) {
@@ -614,7 +621,7 @@ ipcMain.handle('whisper:install', (e) => {
 
 ipcMain.handle('whisper:transcribe', async (e, filePath, opts = {}) => {
   const ffmpeg = findBin('ffmpeg');
-  if (!ffmpeg) throw new Error('ffmpeg manquant. Dans le Terminal : brew install ffmpeg');
+  if (!ffmpeg) throw new Error('Outil manquant dans RYACHA (ffmpeg) : réinstalle l’app.');
   if (!fs.existsSync(enginePy()) || !modelReady()) throw new Error('Moteur pas encore installé.');
   const send = (p) => { if (!e.sender.isDestroyed()) e.sender.send('whisper:progress', { filePath, ...p }); };
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ryacha-'));
