@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict';
 import pubsLib from '../premiere/lib/pubs.cjs';
 import panelCaptions from '../premiere/lib/captions.cjs';
-import { trimPhrase } from '../src/lib/ads/takes.js';
+import { trimPhrase, recordingFrom, matchParts } from '../src/lib/ads/takes.js';
+import { clipsOf, applyEdits, snapEdge, setEdge, pruneEdits, limits, searchTakes, inClip, swapInClip, FRAME, MIN_CLIP } from '../src/lib/ads/edits.js';
 import { expand, prepWords, phrases, speechMask, levelTrack, piecesFor, cleanDisfluencies, quoteWords, noRepeats, BODY_GAP, sayWords } from '../src/lib/ads/cut.js';
 
 let n = 0;
@@ -223,6 +224,128 @@ test('job: part sequences first (hooks too), ads only nest them', () => {
   assert.deepEqual(job.importBin, ['Imports']);
 });
 
+
+// a made-up rush for the timeline: words spaced like say(), phrases split at full stops
+const rush = (id, text, start = 1000) => {
+  const raw = say(text, { start });
+  return recordingFrom(id, { path: `/x/${id}.mov`, name: `${id}.mov` }, { words: raw, speech: speechOf(raw), duration: start + raw.length * 300 + 5000 });
+};
+
+test('timeline: edges are named by their word, an edit moves one and goes when it is back', () => {
+  const r = rush('R1', 'on part demain matin. et on rentre le soir.');
+  const pieces = [{ media: '/x/R1.mov', in: 980, out: 2190 }, { media: '/x/R1.mov', in: 2180, out: 3690 }];
+  const clips = clipsOf(pieces, [r]);
+  assert.equal(clips[0].keyIn, 'R1#0:in');
+  assert.equal(clips[0].keyOut, 'R1#3:out');
+  assert.equal(clips[1].keyIn, 'R1#4:in');
+  let edits = setEdge({}, clips[0], 'in', 1580); // start a word later
+  assert.deepEqual(edits, { 'R1#0:in': 1580 });
+  assert.equal(applyEdits(pieces, edits, [r])[0].in, 1580);
+  edits = setEdge(edits, clips[0], 'in', 980);
+  assert.deepEqual(edits, {});
+});
+
+test('timeline: an edge snaps to the gap between words, or to the frame when moved freely', () => {
+  const r = rush('R1', 'un deux trois quatre');
+  assert.equal(snapEdge(1640, 'in', r), r.words[2].s - 20); // "trois" starts at 1600
+  assert.equal(snapEdge(1640, 'in', r, { free: true }), Math.round(1640 / FRAME) * FRAME);
+  assert.equal(snapEdge(1900, 'out', r), r.words[2].e + 30);
+});
+
+test('timeline: limits — a clip stays 100 ms long, reaches 3 s at most, never repeats the next stretch of its rush', () => {
+  const r = rush('R1', 'un deux trois quatre cinq six sept huit');
+  const pieces = [{ media: '/x/R1.mov', in: 1580, out: 2290 }, { media: '/x/R1.mov', in: 2780, out: 3290 }];
+  assert.equal(applyEdits(pieces, { 'R1#2:in': 2250 }, [r])[0].in, 2290 - MIN_CLIP); // dragged past its own end
+  assert.equal(applyEdits(pieces, { 'R1#4:out': 9000 }, [r])[0].out, 2780); // the next clip continues the same rush
+  assert.equal(applyEdits(pieces, { 'R1#7:out': 99999 }, [r])[1].out, 3290 + 3000); // 3 s past the AI's cut at most
+  const L = limits(applyEdits(pieces, {}, [r]), 0, [r]);
+  assert.equal(L.maxOut, 2780);
+  assert.equal(L.minIn, 0); // 3 s back from 1580 is before the rush starts
+});
+
+test('timeline: an edit stops applying when its sentence gets another take', () => {
+  const r = rush('R1', 'on part demain matin. on part demain matin.');
+  const first = [{ media: '/x/R1.mov', in: 980, out: 2190 }];
+  const second = [{ media: '/x/R1.mov', in: 2180, out: 3490 }];
+  const edits = setEdge({}, clipsOf(first, [r])[0], 'out', 2000);
+  assert.equal(applyEdits(second, edits, [r])[0].out, 3490); // other take: untouched
+  assert.deepEqual(pruneEdits(edits, second, [r]), {});
+  assert.deepEqual(pruneEdits(edits, first, [r]), edits);
+});
+
+test('timeline: search finds the same words in another rush, best first', () => {
+  const a = rush('R1', 'bonjour à tous. on commence.');
+  const b = rush('R2', 'alors. aujourd’hui on commence tout doucement. merci.');
+  const hits = searchTakes('on commence', [a, b]);
+  assert.ok(hits.length >= 2);
+  assert.deepEqual(hits[0].phrases, ['R1#1']);
+  assert.ok(hits.some((h) => h.rec === 'R2' && /commence/.test(h.text)));
+  assert.deepEqual(searchTakes('rien à voir ici', [a, b]), []);
+});
+
+test('timeline: a take found by search replaces the sentence, words and text included', () => {
+  const sc = parseBriefReply({ script: 'S9', title: 't', notes: [], variants: [
+    { id: 'V1', name: '', hooks: [part('a')], transis: [], corps: [], corps_from: '' },
+  ] }, 'S9');
+  const a = rush('R1', 'bonjour à tous. on commence.');
+  const b = rush('R2', 'alors. on commence vraiment.');
+  const takes = { parts: [{ id: 'V1|H1', segments: [{ phrases: ['R1#1'], alternatives: [], trims: [] }], confidence: 'sure', note: '' }] };
+  const auto = matchParts(sc, [a, b], takes, {})['V1|H1'];
+  assert.equal(auto.pieces[0].media, '/x/R1.mov');
+  const swapped = matchParts(sc, [a, b], takes, { choices: { 'V1|H1': { 0: { phrases: ['R2#1'] } } } })['V1|H1'];
+  assert.equal(swapped.pieces[0].media, '/x/R2.mov');
+  assert.equal(swapped.segments[0].custom.text, 'on commence vraiment.');
+  assert.deepEqual(swapped.segments[0].words, [{ rec: 'R2', from: 1, to: 3 }]);
+});
+
+test('timeline: a found take keeps the words that match, a differing number included', () => {
+  const a = rush('R1', 'pour les gens nés en 1985.');
+  const c = rush('R3', 'prise deux. pour les gens nés en 1986 et qui aiment la mer.');
+  const hit = searchTakes('pour les gens nés en 1985', [a, c]).find((h) => h.rec === 'R3');
+  assert.deepEqual(hit.phrases, ['R3#1']);
+  assert.deepEqual(hit.trims, [{ phrase: 'R3#1', span: [0, 5] }]);
+  assert.equal(hit.text, 'pour les gens nés en 1986');
+});
+
+test('timeline: a sentence over two clips — replace or delete acts on the selected clip only', () => {
+  const sc = parseBriefReply({ script: 'S9', title: 't', notes: [], variants: [
+    { id: 'V1', name: '', hooks: [part('a')], transis: [], corps: [], corps_from: '' },
+  ] }, 'S9');
+  const a = rush('R1', 'pour les gens nés en 1985.');
+  const b = rush('R2', 'et qui adorent courir.');
+  const c = rush('R3', 'pour les gens nés en 1986 et qui aiment la mer.');
+  const recs = [a, b, c];
+  const takes = { parts: [{ id: 'V1|H1', segments: [{ phrases: ['R1#0', 'R2#0'], alternatives: [], trims: [] }], confidence: 'sure', note: '' }] };
+  const auto = matchParts(sc, recs, takes, {})['V1|H1'];
+  const sg = auto.segments[0];
+  const clips = clipsOf(auto.pieces, recs);
+  assert.equal(clips.length, 2);
+  const mine = inClip(sg.now, sg.nowTrims, clips[0], recs);
+  assert.deepEqual(mine, { ids: ['R1#0'], text: 'pour les gens nés en 1985.', whole: false });
+  const hit = searchTakes(mine.text, recs).find((h) => h.rec === 'R3');
+  const take = swapInClip(sg.now, sg.nowTrims, clips[0], recs, { phrases: hit.phrases, trims: hit.trims });
+  assert.deepEqual(take, { phrases: ['R3#0', 'R2#0'], trims: [{ phrase: 'R3#0', span: [0, 5] }], kind: 'clip' });
+  const swapped = matchParts(sc, recs, takes, { choices: { 'V1|H1': { 0: take } } })['V1|H1'];
+  assert.deepEqual(swapped.pieces.map((p) => p.media), ['/x/R3.mov', '/x/R2.mov']);
+  assert.equal(swapped.text, 'pour les gens nés en 1986 et qui adorent courir.');
+  assert.deepEqual(swapped.segments[0].words, [{ rec: 'R3', from: 0, to: 5 }, { rec: 'R2', from: 0, to: 3 }]);
+  // delete from the first clip: the rest of the sentence stays
+  assert.deepEqual(swapInClip(sg.now, sg.nowTrims, clips[0], recs), { phrases: ['R2#0'], trims: [], kind: 'clip' });
+  // a sentence wholly in one clip is replaced or removed whole
+  assert.equal(inClip(['R2#0'], [], clipsOf([auto.pieces[1]], recs)[0], recs).whole, true);
+});
+
+test('timeline: Premiere gets the edited cut', () => {
+  const sc = parseBriefReply({ script: 'S9', title: 't', notes: [], variants: [
+    { id: 'V1', name: '', hooks: [part('a')], transis: [], corps: [part('c1')], corps_from: '' },
+  ] }, 'S9');
+  const r = rush('R1', 'un deux trois quatre cinq six');
+  const auto = [{ media: '/x/R1.mov', in: 980, out: 2290 }];
+  const edited = applyEdits(auto, setEdge({}, clipsOf(auto, [r])[0], 'out', 1990), [r]);
+  const parts = { 'V1|H1': { pieces: edited }, 'V1|C1': { pieces: [{ media: '/x/R1.mov', in: 3000, out: 4000 }] } };
+  const job = buildJob({ script: sc, parts, live: planAds(sc), media: [{ path: '/x/R1.mov', name: 'R1.mov' }] });
+  assert.deepEqual(job.sequences[0].clips, [{ media: 'M1', in: 0.98, out: 1.99 }]);
+});
 
 test('trim inside a phrase: a shared continuation glued to another hook’s first sentence', () => {
   const w = prepWords(say('pour les gens nés en 1985 et qui adorent courir le matin'));

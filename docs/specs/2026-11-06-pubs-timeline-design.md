@@ -28,6 +28,11 @@ in every ad that uses it, like a nest in Premiere).
 - **Replace the take**: "Remplacer la prise" opens a list with the other takes the AI found for that sentence, and a
   search box (prefilled with the sentence) that finds the same words anywhere in the rushes. Each result shows its
   words, its rush and time, and plays on its own. Choosing one replaces that sentence's take.
+- A sentence can also run over two clips (its first words from one rush, the rest from another). Replace and
+  Delete then act on the selected clip's part of it only (the search is prefilled with that part); the rest keeps
+  its phrases and cut points. The AI's takes stay offered too, marked "toute la phrase".
+- A take found by search keeps only the words that match (stretched over a word said otherwise at either end, such
+  as another year); the clip's edges can still be dragged out to the rest of the phrase.
 - **Delete**: removes the sentence (what "retirer" does today); undo or "Revenir à la coupe de l'IA" brings it back.
 - "C'est bon", the flags and the brief line stay as they are.
 
@@ -35,7 +40,10 @@ in every ad that uses it, like a nest in Premiere).
 The cut stays computed from the AI's answer each time (`matchParts`); the editor's edits are applied on top, so
 switching a take or going back to the AI's cut stays simple and the analysis itself is never rewritten.
 - `job.choices[part][sentence]` keeps today's values (0 = chosen take, n = other take, -1 = removed) and can also be
-  `{ phrases: [...] }`, a take found by search (phrase ids in any rush; `piecesFromPhrases` already takes any ids).
+  `{ phrases: [...], trims: [...] }`, a take changed in the timeline (phrase ids in any rush; `piecesFromPhrases`
+  already takes any ids). Its trims are the AI's text anchors for the phrases it kept, or `{ phrase, span: [a, b] }`
+  for the exact words a search matched. `kind: 'clip'` marks a take where only one clip's part was replaced or
+  removed ("prise retouchée" in the list; "prise trouvée" for a whole sentence found by search).
 - `job.edits[part]` = `{ [edge]: ms }`: where an edge of the AI's cut was moved to. `edge` names the edge by what it
   is in the rush, `"<rush id>#<word index>:in"` or `":out"` (the first or last word of a clip), so an edit stays on
   its clip when nothing else changes, and stops applying by itself when that sentence gets another take. Edits that

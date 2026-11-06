@@ -812,6 +812,30 @@ ipcMain.handle('ads:writeJob', (_e, job) => {
   fs.writeFileSync(file, JSON.stringify(job, null, 1));
   return file;
 });
+// Pubs timeline: small frames of a rush (64 px high), kept next to the transcripts so the timeline draws them at once.
+// Times are rounded to 0.25 s so neighbouring clips share frames; three ffmpeg at a time, nothing in the journal.
+const grabFrame = (ffmpeg, file, ms, out) => new Promise((resolve) => {
+  const p = spawn(ffmpeg, ['-nostdin', '-v', 'error', '-y', '-ss', String(ms / 1000), '-i', file, '-frames:v', '1', '-vf', 'scale=-2:64', '-q:v', '6', out]);
+  p.on('error', () => resolve(false));
+  p.on('close', (code) => resolve(code === 0 && fs.existsSync(out)));
+});
+ipcMain.handle('ads:thumbs', async (_e, filePath, times) => {
+  const ffmpeg = findBin('ffmpeg');
+  if (!ffmpeg || !fs.existsSync(filePath)) return [];
+  const dir = path.join(adsCacheDir(), 'thumbs');
+  fs.mkdirSync(dir, { recursive: true });
+  const key = adsCacheKey(filePath);
+  const wanted = [...new Set((times || []).slice(0, 200).map((t) => Math.max(0, Math.round(t / 250) * 250)))];
+  const out = [];
+  for (let i = 0; i < wanted.length; i += 3) {
+    await Promise.all(wanted.slice(i, i + 3).map(async (ms) => {
+      const f = path.join(dir, `${key}-${ms}.jpg`);
+      if (fs.existsSync(f) || await grabFrame(ffmpeg, filePath, ms, f)) out.push({ t: ms, file: f });
+    }));
+  }
+  return out.sort((a, b) => a.t - b.t);
+});
+
 ipcMain.handle('ads:listMedia', (_e, folder) => {
   // every video/audio file in the footage folder (subfolders too), skipping exports and Premiere's own folders
   const exts = /\.(mov|mp4|m4v|mxf|mts|avi|mkv|mp3|wav|m4a|aif|aiff)$/i;

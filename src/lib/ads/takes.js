@@ -120,6 +120,27 @@ export function buildTakesRequest(parts, recordings) {
   return { system: SYSTEM, user, schema: SCHEMA, name: 'ad_takes' };
 }
 
+/** Phrase ids (+ their trims) → each phrase's words as used: [{ id: 'R1#4', rec, idx: [wordIndex…] }]. */
+export function phraseWords(ids, recordings, trims = []) {
+  const byId = new Map((trims || []).map((t) => [t.phrase, t]));
+  return resolve(ids, recordings).map(({ rec, phrase }) => {
+    const id = `${rec.id}#${phrase}`;
+    return { id, rec, idx: trimPhrase(rec.words, rec.phrases[phrase], byId.get(id)).idx };
+  });
+}
+
+/** Phrase ids (+ their trims) → the words they cover in each rush: [{ rec: 'R1', from, to }] (word indices). */
+export function wordSpans(ids, recordings, trims = []) {
+  const spans = [];
+  for (const { rec, idx: w } of phraseWords(ids, recordings, trims)) {
+    if (!w.length) continue;
+    const last = spans[spans.length - 1];
+    if (last && last.rec === rec.id && w[0] <= last.to + 1) last.to = Math.max(last.to, w[w.length - 1]);
+    else spans.push({ rec: rec.id, from: w[0], to: w[w.length - 1] });
+  }
+  return spans;
+}
+
 /** "R1#12" ids → [{ rec, phrase }] (unknown ids dropped) */
 function resolve(ids, recordings) {
   return (ids || []).map((id) => {
@@ -134,6 +155,8 @@ function resolve(ids, recordings) {
  * matched on spelling-free tokens). → { idx, missed } where missed = an anchor that wasn't found (phrase kept whole).
  */
 export function trimPhrase(words, idx, trim) {
+  // a take found in the timeline's search keeps the exact words it matched: span = [first, last] place in the phrase
+  if (Array.isArray(trim?.span)) return { idx: idx.slice(trim.span[0], trim.span[1] + 1), missed: false };
   if (!trim || (!trim.from && !trim.to)) return { idx, missed: false };
   const toks = idx.flatMap((wi, k) => expand(words[wi].text).map((t) => ({ t, k })));
   const find = (text, last) => {
@@ -219,15 +242,33 @@ export function matchParts(script, recordings, takes, opts = {}) {
           // each sentence of the take, with the other attempts of it the editor can switch to
           res.segments = segs.map((g) => ({
             phrases: g.phrases,
+            trims: g.trims || [],
             text: piecesFromPhrases(g.phrases, recordings, fine, g.trims).text,
             alternatives: (g.alternatives || []).filter((a) => a?.length).map((a) => ({ phrases: a, ...piecesFromPhrases(a, recordings, fine) })).filter((a) => a.pieces.length),
           }));
-          const pick = segs.flatMap((g, i) => {
+          // the take each sentence uses now: the AI's (0), another it listed (n), one the editor found by search
+          // ({ phrases }), or none (-1, removed by the editor)
+          const takeOf = (g, i) => {
             const c = choice[i] || 0;
-            if (c === -1) return []; // sentence removed by the editor
+            if (c === -1) return [];
+            if (c && typeof c === 'object' && c.phrases) return c.phrases;
             return c && res.segments[i].alternatives[c - 1] ? res.segments[i].alternatives[c - 1].phrases : g.phrases;
+          };
+          // a take edited in the timeline keeps the cut points ("trims") of the phrases it still has
+          const trimsOf = (g, i) => {
+            const c = choice[i] || 0;
+            if (c === 0) return g.trims || [];
+            return c && typeof c === 'object' ? c.trims || [] : [];
+          };
+          res.segments.forEach((sg, i) => {
+            const c = choice[i] || 0;
+            if (c && typeof c === 'object' && c.phrases) sg.custom = { phrases: c.phrases, text: piecesFromPhrases(c.phrases, recordings, fine, c.trims).text };
+            sg.now = takeOf(segs[i], i); // the phrases used now, and their trims: what the timeline edits
+            sg.nowTrims = trimsOf(segs[i], i);
+            sg.words = wordSpans(sg.now, recordings, sg.nowTrims); // which clip holds which sentence, for the timeline
           });
-          const trims = segs.flatMap((g, i) => (choice[i] || 0) === 0 ? g.trims || [] : []); // trims belong to the chosen take
+          const pick = segs.flatMap((g, i) => takeOf(g, i));
+          const trims = segs.flatMap((g, i) => trimsOf(g, i)); // trims belong to the take they were made for
           const main = piecesFromPhrases(pick, recordings, fine, trims);
           if (main.missed) { res.confidence = 'check'; res.flags.push('Coupe au milieu d’une phrase introuvable : la phrase est gardée entière'); }
           res.pieces.push(...main.pieces);

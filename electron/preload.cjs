@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld('kit', {
     listMedia: call('ads:listMedia'),
     readBrief: call('ads:readBrief'),
     writeJob: call('ads:writeJob'),
+    thumbs: call('ads:thumbs'),
     onProgress: (fn) => { const h = (_e, p) => fn(p); ipcRenderer.on('ads:progress', h); return () => ipcRenderer.off('ads:progress', h); },
   },
   premiere: { status: call('premiere:status'), install: call('premiere:install') },

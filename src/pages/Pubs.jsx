@@ -8,6 +8,8 @@ import { recordingFrom, spokenParts, buildTakesRequest, matchParts } from '../li
 import { askAI, availableEngines, adsEngine, engineLabel } from '../lib/ads/ai.js';
 import { usePanelStatus, InstallButton } from '../components/PremierePanel.jsx';
 import { playAnalyseSound, SoundControl } from '../components/AnalyseSound.jsx';
+import { PartTimeline } from '../components/PartTimeline.jsx';
+import { applyEdits, pruneEdits } from '../lib/ads/edits.js';
 
 const fileUrl = (p) => 'file://' + p.split('/').map(encodeURIComponent).join('/');
 const cleanErr = (e) => String(e?.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
@@ -20,7 +22,7 @@ const VIDEO = /\.(mov|mp4|m4v|mxf|mts|avi|mkv)$/i;
  */
 export default function Pubs({ active }) {
   const notify = useToast();
-  const [job, setJob] = useState(null); // persisted: { briefName, briefText, scriptId, folder, media, script, takes, choices, adsOff, loose }
+  const [job, setJob] = useState(null); // persisted: { briefName, briefText, scriptId, folder, media, script, takes, choices, edits, adsOff, loose }
   const [phase, setPhase] = useState('setup'); // setup | running | review
   const [run, setRun] = useState(null); // { step, note, pct, file, error }
   const [recs, setRecs] = useState(null); // recordings (words + sound), rebuilt from the engine cache
@@ -47,7 +49,17 @@ export default function Pubs({ active }) {
   }, [job]);
 
   const scripts = useMemo(() => (job?.briefText ? findScripts(job.briefText, (job.briefName || 'Script').replace(/\.[^.]+$/, '')) : []), [job?.briefText]);
-  const parts = useMemo(() => (job?.script && job.takes && recs ? matchParts(job.script, recs, job.takes, { loose: !!job.loose, choices: job.choices || {} }) : null), [job?.script, job?.takes, job?.loose, job?.choices, recs]);
+  const parts = useMemo(() => {
+    if (!(job?.script && job.takes && recs)) return null;
+    const out = matchParts(job.script, recs, job.takes, { loose: !!job.loose, choices: job.choices || {} });
+    // the editor's trims on top of the AI's cut (edits.js): the player, the list and Premiere all use the edited pieces
+    for (const [k, p] of Object.entries(out)) {
+      p.autoPieces = p.pieces;
+      p.clips = applyEdits(p.pieces, job.edits?.[k], recs);
+      p.pieces = p.clips.map((c) => ({ media: c.media, in: c.in, out: c.out }));
+    }
+    return out;
+  }, [job?.script, job?.takes, job?.loose, job?.choices, job?.edits, recs]);
   const ads = useMemo(() => (job?.script ? planAds(job.script) : []), [job?.script]);
   // the rushes usually say which script they are ("Test S11", "S11 - Acc 1.mp4"): pick it when only one script fits
   useEffect(() => {
@@ -90,7 +102,7 @@ export default function Pubs({ active }) {
       const spoken = spokenParts(parsed);
       const takes = spoken.length ? await askAI(buildTakesRequest(spoken, recordings)) : { parts: [] };
       setRecs(recordings);
-      setJob((j) => ({ ...j, script: parsed, takes, choices: {}, adsOff: [] }));
+      setJob((j) => ({ ...j, script: parsed, takes, choices: {}, edits: {}, adsOff: [] }));
       setPhase('review'); setRun(null); setSel(null);
     } catch (e) {
       setPhase('setup'); setRun({ error: cleanErr(e) });
@@ -118,7 +130,7 @@ export default function Pubs({ active }) {
       <div className="flex min-h-0 flex-1 flex-col px-8 pb-6">
         {phase === 'running' ? <Progress run={run} />
           : phase === 'review' && parts ? (
-            <Review job={job} setJob={setJob} parts={parts} ads={ads} sel={sel} setSel={setSel} />
+            <Review job={job} setJob={setJob} parts={parts} recs={recs} ads={ads} sel={sel} setSel={setSel} />
           ) : (
             <Setup job={job} setJob={setJob} scripts={scripts} run={run} onBrief={loadBrief} onFolder={loadFolder} onAnalyse={analyse} />
           )}
@@ -299,7 +311,7 @@ function Progress({ run }) {
 
 const KIND = { H: 'Accroches', T: 'Transitions', C: 'Corps de pub' };
 
-function Review({ job, setJob, parts, ads, sel, setSel }) {
+function Review({ job, setJob, parts, recs, ads, sel, setSel }) {
   const script = job.script;
   const okSet = new Set(job.ok || []);
   const keys = Object.keys(parts);
@@ -309,6 +321,14 @@ function Review({ job, setJob, parts, ads, sel, setSel }) {
   const off = new Set(job.adsOff || []);
   const live = ads.filter((a) => (a.skip ? off.has(`+${a.name}`) : !off.has(a.name)));
   const choose = (key, seg, attempt) => setJob((j) => ({ ...j, choices: { ...j.choices, [key]: { ...(j.choices?.[key] || {}), [seg]: attempt } }, ok: [...new Set([...(j.ok || []), key])] }));
+  // timeline edits: kept only while they sit on an edge of the AI's cut (a replaced take drops its own)
+  const setEdits = (key, e) => setJob((j) => ({ ...j, edits: { ...j.edits, [key]: pruneEdits(e, parts[key].autoPieces, recs) }, ok: [...new Set([...(j.ok || []), key])] }));
+  const restore = (key, snap) => setJob((j) => ({ ...j, edits: { ...j.edits, [key]: snap.edits }, choices: { ...j.choices, [key]: snap.choice } }));
+  const resetPart = (key) => setJob((j) => {
+    const edits = { ...(j.edits || {}) }, choices = { ...(j.choices || {}) };
+    delete edits[key]; delete choices[key];
+    return { ...j, edits, choices };
+  });
 
   return (
     <div className="flex min-h-0 flex-1 gap-4">
@@ -343,6 +363,7 @@ function Review({ job, setJob, parts, ads, sel, setSel }) {
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto">
         <PartDetail key={current} k={current} title={partTitle(script, current)} part={parts[current]} choice={job.choices?.[current] || {}} ok={okSet.has(current)}
+          recs={recs} edits={job.edits?.[current] || {}} onEdits={(e) => setEdits(current, e)} onRestore={(snap) => restore(current, snap)} onReset={() => resetPart(current)}
           onChoose={(seg, attempt) => choose(current, seg, attempt)}
           onOk={() => setJob((j) => ({ ...j, ok: [...new Set([...(j.ok || []), current])] }))} />
         <AdsList ads={ads} off={off} onToggle={(a) => setJob((j) => {
@@ -373,7 +394,7 @@ function ResetButton({ onReset }) {
     : <button className="btn" onClick={() => setSure(true)}><RotateCcw size={13} /> Nouveau projet</button>;
 }
 
-function PartDetail({ k, title, part, choice, ok, onChoose, onOk }) {
+function PartDetail({ k, title, part, choice, ok, onChoose, onOk, recs, edits, onEdits, onRestore, onReset }) {
   return (
     <div className="card p-5">
       <div className="flex items-start gap-3">
@@ -386,17 +407,22 @@ function PartDetail({ k, title, part, choice, ok, onChoose, onOk }) {
       {part.flags.length > 0 && !ok && (
         <ul className="mt-3 space-y-1 text-[12.5px] text-warn">{part.flags.map((f, i) => <li key={i} className="flex gap-1.5"><AlertTriangle size={13} className="mt-0.5 shrink-0" />{f}</li>)}</ul>
       )}
-      <div className="mt-4 flex gap-4">
-        <Player pieces={part.pieces} />
-        <div className="min-w-0 flex-1">
+      <div className="mt-4">
+        <PartTimeline clips={part.clips || []} recordings={recs || []} segments={part.segments} choice={choice} edits={edits}
+          onEdits={onEdits} onChoose={onChoose} onRestore={onRestore} onReset={onReset} />
+      </div>
+      <div className="mt-4">
+        <div className="min-w-0">
           {part.segments?.length ? (
             <ol className="space-y-2">
               {part.segments.map((g, i) => {
                 const now = choice[i] || 0;
+                const found = typeof now === 'object'; // a take changed in the timeline: found by search, or a clip's part replaced or removed
                 const attempts = [{ text: g.text }, ...g.alternatives];
                 return (
                   <li key={i} className="group text-[13px] leading-relaxed">
-                    <span data-selectable className={now === -1 ? 'text-faint line-through' : ''}>{attempts[Math.max(0, now)]?.text || g.text}</span>
+                    <span data-selectable className={now === -1 ? 'text-faint line-through' : ''}>{found ? g.custom?.text || g.text : attempts[Math.max(0, now)]?.text || g.text}</span>
+                    {found && <span className="ml-2 rounded-md border border-accent px-1.5 align-middle text-[11px] text-accent">{now.kind === 'clip' ? 'prise retouchée' : 'prise trouvée'}</span>}
                     <button onClick={() => onChoose(i, now === -1 ? 0 : -1)} className={`ml-2 rounded-md border border-line px-1.5 align-middle text-[11px] ${now === -1 ? 'text-accent' : 'text-faint opacity-0 group-hover:opacity-100 hover:text-ink'}`}>
                       {now === -1 ? 'remettre' : 'retirer'}
                     </button>

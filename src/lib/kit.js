@@ -39,6 +39,7 @@ const mock = {
     prepare: async () => { throw new Error('Disponible uniquement dans l’app RYACHA.'); },
     listMedia: async () => [],
     writeJob: async () => null,
+    thumbs: async () => [],
     readBrief: async () => { throw new Error('Disponible uniquement dans l’app RYACHA.'); },
     onProgress: () => () => {},
   },
