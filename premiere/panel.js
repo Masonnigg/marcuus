@@ -71,6 +71,35 @@
   window.addEventListener('error', (e) => reportError(e.message, e.error && e.error.stack));
   window.addEventListener('unhandledrejection', (e) => reportError((e.reason && e.reason.message) || String(e.reason), e.reason && e.reason.stack));
 
+  // A file dropped on the panel (a clip from the Finder that misses the timeline) would replace the panel with that
+  // file: an empty panel until it is closed and reopened. Nothing here takes drops, so none goes through.
+  const noDrop = (e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'none'; };
+  window.addEventListener('dragover', noDrop);
+  window.addEventListener('drop', noDrop);
+
+  // The panel's own journal, on this Mac only (pubs/panel-journal.log): when it opens, closes, hides, and when it
+  // froze, so an empty panel can be explained afterwards. Kept short.
+  const JOURNAL = path.join(DATA, 'panel-journal.log');
+  function journal(text) {
+    try {
+      fs.mkdirSync(DATA, { recursive: true });
+      try { if (fs.statSync(JOURNAL).size > 200000) fs.renameSync(JOURNAL, `${JOURNAL}.1`); } catch (e) {}
+      const step = typeof openStep === 'number' ? ` [${STEP_NAMES[openStep] || openStep}]` : '';
+      fs.appendFileSync(JOURNAL, `${new Date().toISOString()} ${text}${step}\n`);
+    } catch (e) {}
+  }
+  journal(`ouvert (${PANEL_VERSION}, ${window.innerWidth}×${window.innerHeight})`);
+  window.addEventListener('error', (e) => journal(`erreur : ${String(e.message).slice(0, 200)}`));
+  window.addEventListener('beforeunload', () => journal('fermé ou rechargé'));
+  document.addEventListener('visibilitychange', () => journal(document.visibilityState === 'visible' ? 'visible' : 'caché'));
+  // a tick every second: one that comes late while the panel is visible means the panel was frozen that long
+  let tick = Date.now(), seenVisible = document.visibilityState === 'visible';
+  setInterval(() => {
+    const now = Date.now(), visible = document.visibilityState === 'visible';
+    if (visible && seenVisible && now - tick > 3000) journal(`figé ${((now - tick) / 1000).toFixed(1)} s (${($('status') && $('status').textContent || '').slice(0, 80)})`);
+    tick = now; seenVisible = visible;
+  }, 1000);
+
   function bars(n) {
     const r = $('render');
     r.innerHTML = '';
