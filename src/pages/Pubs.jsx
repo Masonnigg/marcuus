@@ -91,7 +91,8 @@ export default function Pubs({ active }) {
     try {
       const names = files.map((f) => f.name);
       setRun({ step: 'brief', t0: Date.now(), names });
-      const parsed = parseBriefReply(await askAI(buildBriefRequest(script)), script.id);
+      const onNote = (note) => setRun((r) => ({ ...r, note })); // another AI took over: say so under the bar
+      const parsed = parseBriefReply(await askAI(buildBriefRequest(script), { onNote }), script.id);
       if (!parsed.variants.some((v) => v.hooks.length)) throw new Error('Aucune accroche trouvée dans ce script.');
       const recordings = [];
       for (let i = 0; i < files.length; i++) {
@@ -100,7 +101,7 @@ export default function Pubs({ active }) {
       }
       setRun({ step: 'takes', t0: Date.now(), names });
       const spoken = spokenParts(parsed);
-      const takes = spoken.length ? await askAI(buildTakesRequest(spoken, recordings)) : { parts: [] };
+      const takes = spoken.length ? await askAI(buildTakesRequest(spoken, recordings), { onNote }) : { parts: [] };
       setRecs(recordings);
       setJob((j) => ({ ...j, script: parsed, takes, choices: {}, edits: {}, adsOff: [] }));
       setPhase('review'); setRun(null); setSel(null);

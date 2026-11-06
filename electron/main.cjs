@@ -184,6 +184,10 @@ function findClaude() {
 
 let claudeProc = null;
 
+// Claude Code's own login is gone (session expired and not refreshed, logged out): say how to reconnect, in French
+const CLAUDE_SIGNIN = /failed to authenticate|oauth (session|token)|not logged in|please run \/login|invalid api key|authentication_error/i;
+const claudeSignin = () => ({ ok: false, code: 'claude-signin', error: 'Ta connexion Claude Code a expiré. Reconnecte-la : dans le Terminal, tape « claude » puis « /login ». Ou choisis ChatGPT dans Réglages.' });
+
 // opts.system replaces Claude Code's own system prompt; opts.schema forces a JSON answer (structured output)
 ipcMain.handle('claude:ask', (_e, prompt, model, opts = {}) => new Promise((resolve) => {
   const bin = findClaude();
@@ -210,9 +214,10 @@ ipcMain.handle('claude:ask', (_e, prompt, model, opts = {}) => new Promise((reso
     if (signal) return resolve({ ok: false, error: 'Annulé.' });
     try {
       const j = JSON.parse(out);
-      if (j.is_error) return resolve({ ok: false, error: j.result || 'Erreur Claude' });
+      if (j.is_error) return resolve(CLAUDE_SIGNIN.test(j.result || '') ? claudeSignin() : { ok: false, error: j.result || 'Erreur Claude' });
       resolve({ ok: true, text: j.structured_output ? JSON.stringify(j.structured_output) : j.result });
     } catch {
+      if (CLAUDE_SIGNIN.test(err + out)) return resolve(claudeSignin());
       resolve({ ok: false, error: (err || out || `Claude a quitté (code ${code})`).slice(0, 800) });
     }
   });

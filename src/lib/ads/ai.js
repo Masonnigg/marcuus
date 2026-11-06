@@ -24,14 +24,29 @@ export async function adsEngine() {
   return hookEngineOf(s, ok.includes('claude'));
 }
 
-/** req = { system, user, schema, name } → parsed JSON. Claude runs Opus by default: picking takes needs it. */
-export async function askAI(req) {
+/** One request to one engine → { ok, text } | { ok: false, code, error }. Claude runs Opus by default: picking takes needs it. */
+function ask(engine, req, s) {
+  const long = { ...req, timeoutMs: 15 * 60 * 1000 }; // whole transcripts: give the AI time
+  return engine === 'chatgpt' ? kit.chatgpt.ask(long)
+    : engine === 'openai' ? kit.openai.ask(long)
+    : kit.claude.ask(req.user, s.adsModel || 'opus', { system: req.system, schema: req.schema, timeoutMs: 15 * 60 * 1000 });
+}
+
+/**
+ * req = { system, user, schema, name } → parsed JSON. When the engine's login turns out to be gone (Claude Code's
+ * session expired, ChatGPT signed out), another AI connected on this Mac takes over; onNote says so.
+ */
+export async function askAI(req, { onNote } = {}) {
   const s = (await kit.store.get('settings', {})) || {};
   const engine = await adsEngine();
-  const long = { ...req, timeoutMs: 15 * 60 * 1000 }; // whole transcripts: give the AI time
-  const r = engine === 'chatgpt' ? await kit.chatgpt.ask(long)
-    : engine === 'openai' ? await kit.openai.ask(long)
-    : await kit.claude.ask(req.user, s.adsModel || 'opus', { system: req.system, schema: req.schema, timeoutMs: 15 * 60 * 1000 });
+  let r = await ask(engine, req, s);
+  if (!r.ok && (r.code === 'claude-signin' || r.code === 'signin')) {
+    const other = (await availableEngines()).find((e) => e !== engine);
+    if (other) {
+      onNote?.(`${engineLabel(engine)} est déconnecté : ${engineLabel(other)} prend le relais`);
+      r = await ask(other, req, s);
+    }
+  }
   if (!r.ok) throw Object.assign(new Error(r.error || 'Erreur de l’IA'), { code: r.code });
   try { return JSON.parse(r.text); } catch { throw new Error('Réponse illisible de l’IA. Relance l’analyse.'); }
 }
