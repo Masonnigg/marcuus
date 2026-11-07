@@ -71,8 +71,27 @@ for (const [arch, a] of Object.entries(assets)) {
   console.log(`${arch} : ${same ? `mise à jour légère depuis ${previous.version} (${(a.patch.size / 1e6).toFixed(1)} Mo)` : `téléchargement complet (${(a.size / 1e6).toFixed(0)} Mo) : la base a changé`}`);
 }
 
-// the public release page stays bare: the notes are only in latest.json, for the app's update screen
-run('gh', ['release', 'create', tag, '--repo', RELEASES_REPO, '--title', `RYACHA ${version}`, '--notes', '', ...files]);
+// the public release page stays bare: the notes are only in latest.json, for the app's update screen.
+// A draft first, its files uploaded one by one: a big upload that times out is retried by gh, which then finds the
+// file "already exists" and gives up (seen with the 160 MB DMGs); --clobber replaces a half-sent file. The draft goes
+// public only once every file is there at its full size. A draft left by a failed run (never public) is removed.
+const drafts = JSON.parse(out('gh', ['api', `repos/${RELEASES_REPO}/releases`, '--jq', `[.[] | select(.draft and .tag_name == "${tag}") | .id]`]) || '[]');
+for (const id of drafts) out('gh', ['api', '-X', 'DELETE', `repos/${RELEASES_REPO}/releases/${id}`]);
+run('gh', ['release', 'create', tag, '--repo', RELEASES_REPO, '--title', `RYACHA ${version}`, '--notes', '', '--draft']);
+for (const f of files) {
+  for (let attempt = 1; ; attempt++) {
+    try { run('gh', ['release', 'upload', tag, f, '--repo', RELEASES_REPO, '--clobber']); break; } catch (e) {
+      if (attempt >= 4) throw e;
+      console.log(`${f} : envoi interrompu, nouvel essai (${attempt}/3)`);
+    }
+  }
+}
+const sent = JSON.parse(out('gh', ['release', 'view', tag, '--repo', RELEASES_REPO, '--json', 'assets']));
+for (const f of files) {
+  const a = sent.assets.find((x) => x.name === f.split('/').pop());
+  if (!a || a.size !== statSync(join(root, f)).size) { console.error(`${f} : pas en entier sur GitHub. Relance la publication.`); process.exit(1); }
+}
+run('gh', ['release', 'edit', tag, '--repo', RELEASES_REPO, '--draft=false', '--latest']);
 
 // latest.json goes last: installed apps only see the new version once its downloads exist
 const latest = { version, notes, date: new Date().toISOString(), assets };
